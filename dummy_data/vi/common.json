@@ -1,0 +1,12 @@
+{
+  "nav": {
+    "home": "Nhà",
+    "about": "Về chúng tôi",
+    "nested": {
+      "deep": "Giá trị cốt lõi"
+    }
+  },
+  "button": {
+    "submit": "Xác nhận"
+  }
+}

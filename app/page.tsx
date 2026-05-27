@@ -1,65 +1,95 @@
-import Image from "next/image";
+"use client";
+
+import { useLiveQuery } from "dexie-react-hooks";
+import { Upload } from "lucide-react";
+
+import { db } from "@/lib/db";
+import { useAppStore } from "@/app/store/useAppStore";
+import { Button } from "@/components/ui/button";
+import ProjectUploader from "@/components/ProjectUploader";
+import TranslationTable from "@/components/table/TranslationTable";
+import { ProjectSwitcher } from "@/components/ProjectSwitcher"; // Import Switcher mới
 
 export default function Home() {
+  const { activeProjectId } = useAppStore();
+
+  // Đếm số lượng namespace để biết Project này "có data" hay "rỗng"
+  const hasData = useLiveQuery(
+    () => activeProjectId ? db.namespaces.where({ projectId: activeProjectId }).count() : 0,
+    [activeProjectId]
+  );
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="min-h-screen p-8 md:p-12 max-w-400 mx-auto flex flex-col gap-6  w-full">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b pb-4">
+        <div className="space-y-4 flex flex-col items-center justify-center w-full text-center">
+          <div className="space-y-1">
+            <h1 className="text-3xl font-bold tracking-tight">Our18n v0.1.0 beta - I18n For Our Translator</h1>
+            <p className="text-muted-foreground">
+              Quản lý và chỉnh sửa tệp ngôn ngữ hoàn toàn offline.
+            </p>
+          </div>
+
+          {/* KHU VỰC PROJECT SWITCHER (Chỉ hiển thị khi đã load xong DB) */}
+          <div className="flex items-center gap-4">
+            <ProjectSwitcher />
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+        {/* NÚT IMPORT: Chỉ hiển thị khi có Project ĐÃ CÓ DATA */}
+        {activeProjectId && hasData !== undefined && hasData > 0 && (
+          <Button
+            onClick={() => document.getElementById('project-uploader-trigger')?.click()}
+            className="gap-2"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <Upload className="w-4 h-4" />
+            Import JSON
+          </Button>
+        )}
+      </div>
+
+      {/* TRẠNG THÁI 1: CHƯA CÓ PROJECT NÀO */}
+      {!activeProjectId && (
+        <div className="flex flex-1 items-center justify-center border-2 border-dashed rounded-lg bg-muted/10 p-12 text-center">
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold">Chào mừng đến với Our18n</h3>
+            <p className="text-muted-foreground max-w-sm mx-auto">
+              Tạo một dự án mới ở thanh công cụ phía trên để bắt đầu hành trình bản địa hóa của bạn.
+            </p>
+          </div>
         </div>
-      </main>
-    </div>
+      )}
+
+      {/* TRẠNG THÁI 2: CÓ PROJECT NHƯNG RỖNG DATA -> Bắt buộc hiện Uploader (Không cần showUploader state nữa) */}
+      {activeProjectId && hasData === 0 && (
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <ProjectUploader
+            projectId={activeProjectId}
+            onUploadComplete={() => { }} // Data vào là Component này tự biến mất do hasData > 0
+          />
+        </div>
+      )}
+
+      {/* TRẠNG THÁI 3: CÓ PROJECT & CÓ DATA -> Hiện Siêu Bảng + Uploader ẩn (để khi bấm nút Import nó trượt xuống) */}
+      {activeProjectId && hasData !== undefined && hasData > 0 && (
+        <div className="flex-1 w-full space-y-4">
+          {/* Bọc Uploader trong một cái details/summary ẩn để tận dụng logic toggle thuần HTML/CSS */}
+          <details className="group" id="project-uploader-details">
+            <summary id="project-uploader-trigger" className="hidden"></summary>
+            <div className="pb-4 animate-in fade-in slide-in-from-top-4 duration-300">
+              <ProjectUploader
+                projectId={activeProjectId}
+                onUploadComplete={() => {
+                  // Đóng thẻ details lại sau khi upload
+                  document.getElementById('project-uploader-details')?.removeAttribute('open');
+                }}
+              />
+            </div>
+          </details>
+
+          <TranslationTable />
+        </div>
+      )}
+    </main>
   );
 }

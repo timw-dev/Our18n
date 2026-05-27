@@ -1,0 +1,12 @@
+{
+    "nav": {
+        "home": "Home",
+        "about": "About Us",
+        "nested": {
+            "deep": "Deep Value"
+        }
+    },
+    "button": {
+        "submit": "Submit"
+    }
+}
