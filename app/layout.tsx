@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   authors: [{ name: "Đoàn Minh Hào", url: "https://github.com/doanminhhao" }], // Thay bằng link Github của bạn
   keywords: ["i18n", "localization", "translation editor", "json editor", "local-first"],
   openGraph: {
-    title: "Our18n v0.1.0 beta | Local-first I18n Editor",
+    title: "Our18n v0.2.0 beta | Local-first I18n Editor",
     description: "Quản lý và chỉnh sửa tệp JSON ngôn ngữ hoàn toàn offline.",
     url: "https://our18n.vercel.app",
     siteName: "Our18n",

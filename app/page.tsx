@@ -41,7 +41,7 @@ export default function Home() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b pb-4">
         <div className="space-y-4 flex flex-col items-center justify-center w-full text-center">
           <div className="space-y-1">
-            <h1 className="text-3xl font-bold tracking-tight">Our18n v0.1.0 beta - I18n For Our Translator</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Our18n v0.2.0 beta - I18n For Our Translator</h1>
             <p className="text-muted-foreground">
               Quản lý và chỉnh sửa tệp ngôn ngữ hoàn toàn offline.
             </p>
