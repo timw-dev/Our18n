@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Save, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Save, Loader2, History } from "lucide-react";
 import { toast } from "sonner";
 
 import { createSnapshot } from "@/lib/snapshot-utils";
@@ -30,6 +30,15 @@ export function SaveSnapshotDialog({ projectId, hasChanges }: SaveSnapshotDialog
     const [description, setDescription] = useState("");
     const [isSaving, setIsSaving] = useState(false);
 
+    useEffect(() => {
+        if (!open) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setName("");
+            setDescription("");
+            setIsSaving(false);
+        }
+    }, [open]);
+
     const handleSave = async () => {
         if (!name.trim()) {
             toast.error("Vui lòng nhập tên phiên bản!");
@@ -40,9 +49,9 @@ export function SaveSnapshotDialog({ projectId, hasChanges }: SaveSnapshotDialog
         const toastId = toast.loading("Đang lưu Snapshot...");
 
         try {
-            await createSnapshot(projectId, name.trim(), description.trim());
+            const result = await createSnapshot(projectId, name.trim(), description.trim());
 
-            toast.success("Đã lưu phiên bản thành công!", { id: toastId });
+            toast.success(`Đã chốt phiên bản ${result.version} (${result.changeCount} thay đổi)!`, { id: toastId });
             setOpen(false); // Đóng modal
             setName(""); // Reset form
             setDescription("");
@@ -56,19 +65,31 @@ export function SaveSnapshotDialog({ projectId, hasChanges }: SaveSnapshotDialog
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
+            {/* Tận dụng UI cũ của bạn với buttonVariants, thêm class relative để gắn chấm đỏ */}
             <DialogTrigger
                 className={buttonVariants({
                     variant: hasChanges ? "default" : "secondary",
-                    className: "gap-2"
+                    className: "gap-2 relative"
                 })}
                 disabled={!hasChanges}
             >
                 <Save className="w-4 h-4" />
                 Lưu Snapshot
+                {/* Chấm đỏ báo hiệu có thay đổi chưa lưu */}
+                {hasChanges && (
+                    <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                    </span>
+                )}
             </DialogTrigger>
-            <DialogContent className="sm:max-w-106.25">
+
+            <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
-                    <DialogTitle>Lưu phiên bản dịch (Snapshot)</DialogTitle>
+                    <DialogTitle className="flex items-center gap-2">
+                        <History className="w-5 h-5 text-primary" />
+                        Lưu phiên bản dịch (Snapshot)
+                    </DialogTitle>
                     <DialogDescription>
                         Hành động này sẽ chốt toàn bộ các bản dịch bạn vừa sửa thành bản gốc, giúp bạn dễ dàng khôi phục lại nếu có sai sót sau này.
                     </DialogDescription>

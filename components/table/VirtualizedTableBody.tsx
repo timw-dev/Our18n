@@ -69,12 +69,11 @@ export function VirtualizedTableBody({ table, scrollRef }: VirtualizedTableBodyP
                         ref={rowVirtualizer.measureElement}
                         data-index={virtualRow.index}
                     >
-                        {row.getVisibleCells().map((cell, index) => {
-                            const isReadOnly = index === 1;
+                        {row.getVisibleCells().map((cell) => {
                             return (
                                 <TableCell
                                     key={cell.id}
-                                    className={`align-top border-r last:border-r-0 ${isReadOnly ? "bg-muted/10" : ""}`}
+                                    className="align-top border-r last:border-r-0 hover:bg-muted/30 transition-colors"
                                 >
                                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                 </TableCell>

@@ -2,16 +2,21 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { Upload } from "lucide-react";
+import { useEffect } from "react";
 
 import { db } from "@/lib/db";
 import { useAppStore } from "@/app/store/useAppStore";
 import { Button } from "@/components/ui/button";
 import ProjectUploader from "@/components/ProjectUploader";
 import TranslationTable from "@/components/table/TranslationTable";
-import { ProjectSwitcher } from "@/components/ProjectSwitcher"; // Import Switcher mới
+import { ProjectSwitcher } from "@/components/ProjectSwitcher";
 
 export default function Home() {
-  const { activeProjectId } = useAppStore();
+  // Lấy thêm hàm setActiveProject từ store
+  const { activeProjectId, setActiveProject } = useAppStore();
+
+  // Load danh sách projects để phục vụ auto-select
+  const projects = useLiveQuery(() => db.projects.toArray());
 
   // Đếm số lượng namespace để biết Project này "có data" hay "rỗng"
   const hasData = useLiveQuery(
@@ -19,8 +24,20 @@ export default function Home() {
     [activeProjectId]
   );
 
+  // LOGIC AUTO-SELECT: Tự động chọn project làm việc gần nhất khi reload trang
+  useEffect(() => {
+    if (projects && projects.length > 0 && !activeProjectId) {
+      // Sắp xếp giảm dần theo thời gian update
+      const lastUpdatedProject = [...projects].sort((a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      )[0];
+
+      setActiveProject(lastUpdatedProject.id);
+    }
+  }, [projects, activeProjectId, setActiveProject]);
+
   return (
-    <main className="min-h-screen p-8 md:p-12 max-w-400 mx-auto flex flex-col gap-6  w-full">
+    <main className="min-h-screen p-8 md:p-12 max-w-400 mx-auto flex flex-col gap-6 w-full">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b pb-4">
         <div className="space-y-4 flex flex-col items-center justify-center w-full text-center">
           <div className="space-y-1">
@@ -60,27 +77,25 @@ export default function Home() {
         </div>
       )}
 
-      {/* TRẠNG THÁI 2: CÓ PROJECT NHƯNG RỖNG DATA -> Bắt buộc hiện Uploader (Không cần showUploader state nữa) */}
+      {/* TRẠNG THÁI 2: CÓ PROJECT NHƯNG RỖNG DATA */}
       {activeProjectId && hasData === 0 && (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
           <ProjectUploader
             projectId={activeProjectId}
-            onUploadComplete={() => { }} // Data vào là Component này tự biến mất do hasData > 0
+            onUploadComplete={() => { }}
           />
         </div>
       )}
 
-      {/* TRẠNG THÁI 3: CÓ PROJECT & CÓ DATA -> Hiện Siêu Bảng + Uploader ẩn (để khi bấm nút Import nó trượt xuống) */}
+      {/* TRẠNG THÁI 3: CÓ PROJECT & CÓ DATA */}
       {activeProjectId && hasData !== undefined && hasData > 0 && (
         <div className="flex-1 w-full space-y-4">
-          {/* Bọc Uploader trong một cái details/summary ẩn để tận dụng logic toggle thuần HTML/CSS */}
           <details className="group" id="project-uploader-details">
             <summary id="project-uploader-trigger" className="hidden"></summary>
             <div className="pb-4 animate-in fade-in slide-in-from-top-4 duration-300">
               <ProjectUploader
                 projectId={activeProjectId}
                 onUploadComplete={() => {
-                  // Đóng thẻ details lại sau khi upload
                   document.getElementById('project-uploader-details')?.removeAttribute('open');
                 }}
               />

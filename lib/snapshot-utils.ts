@@ -1,54 +1,159 @@
 import { v4 as uuidv4 } from "uuid";
-import { db } from "./db";
+import { db, type TranslationRow, type SnapshotRow } from "./db";
+import { useAppStore } from "@/app/store/useAppStore";
+
+function bumpPatchVersion(currentVersion: string): string {
+    const parts = currentVersion.split(".");
+    if (parts.length !== 3) return "0.0.1";
+
+    const patch = parseInt(parts[2], 10);
+    if (isNaN(patch)) return "0.0.1";
+
+    parts[2] = (patch + 1).toString();
+    return parts.join(".");
+}
 
 export const createSnapshot = async (
     projectId: string,
     name: string,
     description: string = "",
 ) => {
-    // Mở transaction bọc 2 bảng để đảm bảo an toàn toàn vẹn dữ liệu (ACID)
     return await db.transaction(
         "rw",
         db.versions,
         db.translationRows,
         async () => {
             const now = new Date().toISOString();
+            const currentRows = await db.translationRows
+                .where({ projectId })
+                .toArray();
 
-            // 1. Khởi tạo Record lịch sử
+            const changeCount = currentRows.filter(
+                (row) => row.changeStatus !== "unchanged",
+            ).length;
+
+            // FIX 1: Đếm số lượng thực tế sẽ hiển thị (Không tính dòng chờ xóa)
+            const activeRowCount = currentRows.filter(
+                (row) => row.changeStatus !== "deleted",
+            ).length;
+
+            const existingVersions = await db.versions
+                .where({ projectId })
+                .sortBy("createdAt");
+            const latestRecord = existingVersions[existingVersions.length - 1];
+            const nextVersion = latestRecord
+                ? bumpPatchVersion(latestRecord.version)
+                : "0.0.1";
+
+            const snapshotData: SnapshotRow[] = currentRows.map((row) => ({
+                id: row.id,
+                namespaceId: row.namespaceId,
+                key: row.key,
+                values: { ...row.values },
+                originalValues: { ...row.originalValues },
+                changeStatus: row.changeStatus,
+                cellMeta: row.cellMeta
+                    ? JSON.parse(JSON.stringify(row.cellMeta))
+                    : undefined,
+            }));
+
             const versionId = uuidv4();
             await db.versions.add({
                 id: versionId,
                 projectId,
+                version: nextVersion,
                 name,
                 description,
+                type: "snapshot",
                 createdAt: now,
+                updatedAt: now,
+                rowCount: activeRowCount, // Lưu con số chuẩn vào DB
+                changeCount,
+                snapshot: snapshotData,
             });
 
-            // 2. Tìm tất cả các dòng đang bị sửa/thêm mới (Updated / Added)
-            const changedRows = await db.translationRows
-                .where({ projectId })
-                .filter((row) => row.changeStatus !== "unchanged")
-                .toArray();
+            const rowsToUpdate: TranslationRow[] = [];
+            const rowIdsToDelete: string[] = [];
 
-            // Nếu không có gì thay đổi thì vẫn tạo version rỗng (đánh dấu mốc thời gian)
-            if (changedRows.length === 0) return versionId;
+            for (const row of currentRows) {
+                if (row.changeStatus === "deleted") {
+                    rowIdsToDelete.push(row.id);
+                } else if (row.changeStatus !== "unchanged") {
+                    rowsToUpdate.push({
+                        ...row,
+                        originalValues: { ...row.values },
+                        changeStatus: "unchanged" as const,
+                        updatedAt: now,
+                    });
+                }
+            }
 
-            // 3. Tiến hành "Chốt đơn" (Reset State)
-            const updatedRows = changedRows.map((row) => ({
-                ...row,
-                // Chép đè toàn bộ bản dịch hiện tại vào thành bản Gốc
-                originalValues: { ...row.values },
-                // Trả trạng thái về bình thường
-                changeStatus: "unchanged" as const,
-                // Xóa meta data của Cell (nếu sau này Phase 2 có dùng)
-                cellMeta: {},
-                updatedAt: now,
-            }));
+            if (rowIdsToDelete.length > 0) {
+                await db.translationRows.bulkDelete(rowIdsToDelete);
+            }
+            if (rowsToUpdate.length > 0) {
+                await db.translationRows.bulkPut(rowsToUpdate);
+            }
 
-            // 4. Bulk Write: Đổ ngược lại vào IndexedDB siêu tốc
-            await db.translationRows.bulkPut(updatedRows);
-
-            return versionId;
+            return {
+                success: true,
+                versionId,
+                version: nextVersion,
+                changeCount,
+            };
         },
     );
+};
+
+export const restoreSnapshot = async (projectId: string, versionId: string) => {
+    // FIX 2: Bỏ db.namespaces ra khỏi transaction, tuyệt đối KHÔNG XÓA namespace để bảo toàn dữ liệu gốc
+    return await db.transaction(
+        "rw",
+        db.translationRows,
+        db.versions,
+        async () => {
+            const version = await db.versions.get(versionId);
+            if (!version)
+                throw new Error("Không tìm thấy phiên bản này trong dữ liệu.");
+
+            const keysToDelete = await db.translationRows
+                .where({ projectId })
+                .primaryKeys();
+            if (keysToDelete.length > 0) {
+                await db.translationRows.bulkDelete(keysToDelete);
+            }
+
+            const now = new Date().toISOString();
+            const rowsToRestore: TranslationRow[] = [];
+
+            for (const snapRow of version.snapshot) {
+                if (snapRow.changeStatus === "deleted") continue;
+
+                rowsToRestore.push({
+                    id: snapRow.id,
+                    projectId,
+                    namespaceId: snapRow.namespaceId,
+                    key: snapRow.key,
+                    values: { ...snapRow.values },
+                    originalValues: { ...snapRow.values },
+                    changeStatus: "unchanged",
+                    cellMeta: snapRow.cellMeta
+                        ? JSON.parse(JSON.stringify(snapRow.cellMeta))
+                        : undefined,
+                    translationStatus: {},
+                    createdAt: now,
+                    updatedAt: now,
+                });
+            }
+
+            if (rowsToRestore.length > 0) {
+                await db.translationRows.bulkAdd(rowsToRestore);
+            }
+            useAppStore.getState().setActiveVersion(versionId);
+            return version;
+        },
+    );
+};
+export const deleteSnapshot = async (versionId: string) => {
+    return await db.versions.delete(versionId);
 };

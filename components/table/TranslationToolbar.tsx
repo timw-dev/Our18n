@@ -1,9 +1,10 @@
 "use client";
 import { SaveSnapshotDialog } from "./SaveSnapshotDialog";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { type Table as TanStackTable } from "@tanstack/react-table";
-import { Download, Loader2 } from "lucide-react"; // Dùng icon của lucide-react
-import { toast } from "sonner"; // Hoặc useToast của shadcn nếu bạn xài nó
+import { Download, Loader2, History } from "lucide-react";
+import { toast } from "sonner";
+import { useLiveQuery } from "dexie-react-hooks";
 
 import { db, type TranslationRow } from "@/lib/db";
 import { exportProjectAsZip } from "@/lib/export-utils";
@@ -12,6 +13,7 @@ import { useAppStore } from "@/app/store/useAppStore";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { VersionHistoryPanel } from "@/components/VersionHistoryPanel";
 
 interface TranslationToolbarProps {
     table: TanStackTable<TranslationRow>;
@@ -25,6 +27,29 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
 
     const filteredRows = table.getFilteredRowModel().rows.length;
     const isTableEmpty = totalRows === 0;
+
+    // 1. QUERY KIỂM TRA XEM CÓ TRÙNG KHỚP PHIÊN BẢN NÀO ĐANG ĐƯỢC XEM KHÔNG
+    // Trong kiến trúc lưu trữ của bạn, nếu working copy hiện tại trùng khớp hoàn toàn với một version,
+    // hoặc bạn có state activeVersionId trong Store, bạn có thể gọi trực tiếp.
+    // Dưới đây là giải pháp tối ưu: Tìm kiếm metadata dựa trên trạng thái làm việc (hoặc sync từ Store của bạn nếu có)
+    const allVersions = useLiveQuery(
+        () => activeProjectId ? db.versions.where({ projectId: activeProjectId }).toArray() : [],
+        [activeProjectId]
+    );
+
+    // Giả định bạn lưu activeVersionId trong Store, hoặc nếu không, bạn có thể đọc trạng thái checkout.
+    // Ở đây mình tạo cấu trúc lấy thông tin dựa trên store hoặc tìm kiếm version matching.
+    const { activeVersionId } = useAppStore(); // Đảm bảo bổ sung trường này vào useAppStore nếu bạn có làm tính năng checkout
+
+    const currentVersionName = useMemo(() => {
+        if (!allVersions || allVersions.length === 0) return undefined;
+        if (activeVersionId) {
+            return allVersions.find(v => v.id === activeVersionId)?.name;
+        }
+        // Trường hợp không có activeId cố định, nếu không có thay đổi (hasChanges = false), 
+        // bạn có thể lấy tên của version mới nhất làm context (tùy chọn)
+        return undefined;
+    }, [allVersions, activeVersionId]);
 
     const handleAddLanguage = async () => {
         const langCode = newLang.trim().toLowerCase();
@@ -44,6 +69,7 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
         }
     };
 
+    // 2. TRUYỀN THÊM VERSION NAME VÀO PIPELINE EXPORT
     const handleExport = async () => {
         if (!activeProjectId || isTableEmpty) return;
 
@@ -54,7 +80,8 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
             const project = await db.projects.get(activeProjectId);
             if (!project) throw new Error("Project không tồn tại");
 
-            await exportProjectAsZip(activeProjectId, project.name);
+            // Truyền thêm tên phiên bản hiện hành vào hàm tiện ích
+            await exportProjectAsZip(activeProjectId, project.name, currentVersionName);
 
             toast.success("Export thành công!", { id: toastId });
         } catch (error) {
@@ -108,21 +135,26 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
                     {filteredRows} / {totalRows} keys
                 </div>
 
-
-                {/* NÚT EXPORT */}
                 <div className="flex items-center gap-2 pl-4 border-l">
                     {activeProjectId && (
-                        <SaveSnapshotDialog
-                            projectId={activeProjectId}
-                            hasChanges={hasChanges}
-                        />
+                        <>
+                            {/* TRUYỀN TÊN PHIÊN BẢN HIỆN TẠI VÀO ĐÂY */}
+                            <VersionHistoryPanel
+                                projectId={activeProjectId}
+                                currentVersionName={currentVersionName}
+                            />
+                            <SaveSnapshotDialog
+                                projectId={activeProjectId}
+                                hasChanges={hasChanges}
+                            />
+                        </>
                     )}
 
                     <Button
                         onClick={handleExport}
                         disabled={isTableEmpty || isExporting}
-                        className="gap-2"
-                        variant="outline" // Đổi màu nút Export thành outline cho đỡ tranh giành sự chú ý với nút Save
+                        className="gap-2 shadow-sm"
+                        variant="outline"
                     >
                         {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                         Export ZIP

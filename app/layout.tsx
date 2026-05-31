@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Figtree } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { Toaster } from "@/components/ui/sonner";
 
 const figtree = Figtree({ subsets: ['latin'], variable: '--font-sans' });
 
@@ -17,10 +18,10 @@ const geistMono = Geist_Mono({
 
 // 1. Gắn bộ Metadata chuẩn SEO vào đây
 export const metadata: Metadata = {
-  title: "Our18n(beta) | For Our Translator",
+  title: "Our18n(beta) | I18For Our Translator",
   description: "Công cụ quản lý và chỉnh sửa tệp JSON ngôn ngữ (i18n) hoàn toàn offline. Tối ưu trải nghiệm dịch thuật cho Developer và Translator.",
   applicationName: "Our18n",
-  authors: [{ name: "Đoàn Minh Hào", url: "https://github.com/timw-dev" }], // Thay bằng link Github của bạn
+  authors: [{ name: "Đoàn Minh Hào", url: "https://github.com/doanminhhao" }], // Thay bằng link Github của bạn
   keywords: ["i18n", "localization", "translation editor", "json editor", "local-first"],
   openGraph: {
     title: "Our18n v0.1.0 beta | Local-first I18n Editor",
@@ -30,10 +31,6 @@ export const metadata: Metadata = {
     type: "website",
   },
   manifest: "/manifest.json",
-  icons: {
-    icon: "/favicon.ico",
-    apple: "/apple-touch-icon.png",
-  },
 };
 
 // 2. Tách themeColor ra chuẩn Next.js 14+
@@ -52,7 +49,10 @@ export default function RootLayout({
       suppressHydrationWarning
       className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, "font-sans", figtree.variable)}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <Toaster richColors position="top-right" />
+      </body>
     </html>
   );
 }

@@ -5,6 +5,14 @@ import { db } from "./db";
 export type NestedTranslationObject = {
     [key: string]: string | NestedTranslationObject;
 };
+
+const formatDateForFileName = () => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+};
+
 // 1. Phục hồi JSON phẳng thành JSON lồng nhau (Nested JSON)
 export const unflattenObject = (
     flatObject: Record<string, string>,
@@ -83,6 +91,7 @@ export const buildExportFiles = async (projectId: string) => {
 export const exportProjectAsZip = async (
     projectId: string,
     projectName: string,
+    currentVersionName?: string,
 ) => {
     const filesMap = await buildExportFiles(projectId);
     const zip = new JSZip();
@@ -108,5 +117,9 @@ export const exportProjectAsZip = async (
 
     const blob = await zip.generateAsync({ type: "blob" });
     const safeName = projectName.replace(/[^a-z0-9]/gi, "_").toLowerCase();
-    saveAs(blob, `${safeName}_export_${Date.now()}.zip`);
+    const versionSuffix = currentVersionName ? `_${currentVersionName}` : "";
+    saveAs(
+        blob,
+        `our18n_${safeName}${versionSuffix}_${formatDateForFileName()}.zip`,
+    );
 };

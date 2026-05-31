@@ -3,167 +3,418 @@ import { db, type TranslationRow, type Namespace } from "./db";
 import { flattenJSON } from "./json-utils";
 import { getTranslationStatus } from "./translation-utils";
 
-// Helper function: Tách thông tin từ Path
-const extractPathInfo = (relativePath: string, fallbackLang: string) => {
-    const parts = relativePath.split("/");
-    const fileName = parts.pop() || relativePath;
+// ==========================================
+// 1. HÀM BÓC TÁCH FILE JS (ES6 / CommonJS)
+// ==========================================
+const parseJavaScriptTranslation = (fileContent: string) => {
+    try {
+        let code = fileContent
+            .replace(/export\s+default\s+/g, "")
+            .replace(/module\.exports\s*=\s*/g, "")
+            .trim();
+
+        const firstBraceIndex = code.indexOf("{");
+        if (firstBraceIndex === -1)
+            throw new Error("Không tìm thấy cấu trúc Object hợp lệ");
+
+        code = code.substring(firstBraceIndex);
+        code = code.replace(/;+$/, "").trim();
+
+        return new Function(`return ${code}`)();
+    } catch (error) {
+        throw new Error(`Parse JS thất bại: ${(error as Error).message}`);
+    }
+};
+
+// ==========================================
+// 2. HÀM DETECT LANGUAGE & NAMESPACE
+// ==========================================
+export const detectLanguageAndNamespace = (
+    filePath: string,
+    fallbackLang?: string,
+) => {
+    const normalizedPath = filePath.replace(/\\/g, "/");
+    const parts = normalizedPath.split("/");
+    const fileName = parts.pop() || normalizedPath;
 
     let detectedLang = fallbackLang;
-    let namespaceParts = [...parts];
-
-    // Regex bắt mã ngôn ngữ: VD: 'en', 'vi', 'ko-KR', 'zh-CN'
+    let namespaceParts: string[] = [...parts];
     const langRegex = /^[a-z]{2}(-[A-Z]{2})?$/;
 
+    let langIndex = -1;
     for (let i = 0; i < parts.length; i++) {
         if (langRegex.test(parts[i])) {
             detectedLang = parts[i];
-            // Cắt lấy toàn bộ các folder NẰM SAU folder ngôn ngữ làm namespace
-            namespaceParts = parts.slice(i + 1);
+            langIndex = i;
             break;
         }
     }
 
+    if (langIndex !== -1) namespaceParts = parts.slice(langIndex + 1);
+
     const folderPath =
         namespaceParts.length > 0 ? namespaceParts.join("/") : "/";
+    const namespace =
+        namespaceParts.length > 0 ? `${folderPath}/${fileName}` : fileName;
 
-    return { detectedLang, folderPath, fileName };
+    return { lang: detectedLang, folderPath, fileName, namespace };
 };
 
-export const processImportedFiles = async (
+// ... (Các hàm parseJS và detectLanguageAndNamespace phía trên GIỮ NGUYÊN)
+
+export interface ConflictItem {
+    id: string;
+    rowId: string;
+    namespaceId: string;
+    key: string;
+    lang: string;
+    localValue: string;
+    incomingValue: string;
+    namespacePath: string;
+}
+
+export interface PendingCommitData {
+    projectId: string;
+    detectedLanguages: Set<string>;
+    newNamespaces: Namespace[];
+    newRows: TranslationRow[];
+    rowsToUpdate: TranslationRow[];
+    conflicts: ConflictItem[]; // Thêm mảng chứa các xung đột
+}
+
+export interface ImportPreviewResult {
+    importedCount: number;
+    skippedCount: number;
+    warnings: string[];
+    diffSummary: {
+        added: number;
+        updated: number;
+        unchanged: number;
+        conflicted: number;
+    };
+    pendingData: PendingCommitData | null;
+}
+
+// ==========================================
+// 3. PHASE 1: ANALYZE & DIFF ENGINE
+// ==========================================
+export const analyzeImportedFiles = async (
     projectId: string,
-    fallbackLangCode: string, // Đổi tên để rõ nghĩa: Đây là fallback từ Dropdown UI
+    fallbackLangCode: string,
     files: File[],
-) => {
-    const parsedFilesData: {
-        detectedLang: string;
-        folderPath: string;
-        fileName: string;
-        flattened: Record<string, string>;
-    }[] = [];
-    const detectedLanguages = new Set<string>(); // Lưu danh sách các ngôn ngữ có trong đợt upload này
+): Promise<ImportPreviewResult> => {
+    const parsedFilesData = [];
+    const detectedLanguages = new Set<string>();
+    let importedCount = 0,
+        skippedCount = 0;
+    const warnings: string[] = [];
 
-    // ==========================================
-    // BƯỚC 1: XỬ LÝ ASYNC BÊN NGOÀI TRANSACTION
-    // ==========================================
+    const SILENT_IGNORE_FILES = [
+        "package.json",
+        "package-lock.json",
+        "tsconfig.json",
+        "jsconfig.json",
+        "i18n.js",
+        "next-i18next.config.js",
+        "next.config.js",
+    ];
+    const SILENT_IGNORE_EXTENSIONS = [".md", ".ts", ".jsx", ".tsx", ".txt"];
+
+    // --- BƯỚC 1: ĐỌC FILES ---
     for (const file of files) {
-        if (!file.name.endsWith(".json")) continue;
+        const dropzoneFile = file as File & { path?: string };
+        let relativePath =
+            dropzoneFile.path || file.webkitRelativePath || file.name;
+        if (relativePath.startsWith("/"))
+            relativePath = relativePath.substring(1);
+        const lowerName = file.name.toLowerCase();
 
-        const relativePath = file.webkitRelativePath || file.name;
+        if (
+            SILENT_IGNORE_FILES.includes(lowerName) ||
+            SILENT_IGNORE_EXTENSIONS.some((ext) => lowerName.endsWith(ext)) ||
+            lowerName.startsWith(".")
+        ) {
+            skippedCount++;
+            continue;
+        }
+        if (!lowerName.endsWith(".json") && !lowerName.endsWith(".js")) {
+            skippedCount++;
+            warnings.push(`Không hỗ trợ: ${relativePath}`);
+            continue;
+        }
+        const { lang, folderPath, fileName, namespace } =
+            detectLanguageAndNamespace(relativePath, fallbackLangCode);
+        if (!lang) {
+            skippedCount++;
+            warnings.push(`Không nhận diện được NN: ${relativePath}`);
+            continue;
+        }
 
-        // Auto-detect lang & namespace
-        const { detectedLang, folderPath, fileName } = extractPathInfo(
-            relativePath,
-            fallbackLangCode,
-        );
-
-        detectedLanguages.add(detectedLang);
-
+        detectedLanguages.add(lang);
         try {
             const text = await file.text();
-            const json = JSON.parse(text);
-            const flattened = flattenJSON(json);
-
+            const rawJson = lowerName.endsWith(".js")
+                ? parseJavaScriptTranslation(text)
+                : JSON.parse(text);
+            const flattened = flattenJSON(rawJson);
             parsedFilesData.push({
-                detectedLang,
+                lang,
                 folderPath,
                 fileName,
+                namespace,
                 flattened,
             });
+            importedCount++;
         } catch (error) {
-            console.error(`Lỗi khi đọc file ${file.name}:`, error);
+            skippedCount++;
+            warnings.push(
+                `Lỗi parse ${relativePath}: ${(error as Error).message}`,
+            );
         }
     }
 
-    if (parsedFilesData.length === 0) return;
+    if (parsedFilesData.length === 0) {
+        return {
+            importedCount,
+            skippedCount,
+            warnings,
+            diffSummary: { added: 0, updated: 0, unchanged: 0, conflicted: 0 },
+            pendingData: null,
+        };
+    }
 
-    // ==========================================
-    // BƯỚC 2: CẬP NHẬT NGÔN NGỮ CHO PROJECT
-    // ==========================================
+    // --- BƯỚC 1.5: GOM NHÓM DỮ LIỆU TỪ NHIỀU FILE (Tránh duplicate id và conflict giả) ---
+    const incomingData = new Map<string, Map<string, Record<string, string>>>();
+    const namespaceMeta = new Map<
+        string,
+        { folderPath: string; fileName: string }
+    >();
+
+    for (const data of parsedFilesData) {
+        const { lang, folderPath, fileName, flattened } = data;
+        const nsKey = `${folderPath}/${fileName}`;
+
+        if (!incomingData.has(nsKey)) {
+            incomingData.set(nsKey, new Map());
+            namespaceMeta.set(nsKey, { folderPath, fileName });
+        }
+        const keyMap = incomingData.get(nsKey)!;
+
+        for (const [key, value] of Object.entries(flattened)) {
+            if (!keyMap.has(key)) keyMap.set(key, {});
+            keyMap.get(key)![lang] =
+                typeof value === "string" ? value : String(value);
+        }
+    }
+
+    // --- BƯỚC 2: TÌM XUNG ĐỘT VÀ TẠO DATA ---
+    let addedCount = 0,
+        updatedCount = 0,
+        unchangedCount = 0;
+    const newNamespaces: Namespace[] = [],
+        newRows: TranslationRow[] = [],
+        rowsToUpdate: TranslationRow[] = [],
+        conflicts: ConflictItem[] = [];
+
+    const now = new Date().toISOString();
+    const existingNamespaces = await db.namespaces
+        .where({ projectId })
+        .toArray();
+    const namespaceMap = new Map(
+        existingNamespaces.map((ns) => [`${ns.folderPath}/${ns.fileName}`, ns]),
+    );
+
+    for (const [nsKey, keyMap] of incomingData.entries()) {
+        const meta = namespaceMeta.get(nsKey)!;
+
+        let namespaceRecord = namespaceMap.get(nsKey);
+        if (!namespaceRecord) {
+            namespaceRecord = {
+                id: uuidv4(),
+                projectId,
+                folderPath: meta.folderPath,
+                fileName: meta.fileName,
+            };
+            namespaceMap.set(nsKey, namespaceRecord);
+            newNamespaces.push(namespaceRecord);
+        }
+
+        const existingRows = await db.translationRows
+            .where({ namespaceId: namespaceRecord.id })
+            .toArray();
+        const existingRowMap = new Map(
+            existingRows.map((row) => [row.key, row]),
+        );
+
+        for (const [key, langValues] of keyMap.entries()) {
+            const existingRow = existingRowMap.get(key);
+
+            if (existingRow) {
+                let hasAnySafeUpdate = false;
+                let isRowUnchanged = true;
+                const isDeleted = existingRow.changeStatus === "deleted";
+
+                for (const [lang, incomingValue] of Object.entries(
+                    langValues,
+                )) {
+                    const valueChanged =
+                        existingRow.values[lang] !== incomingValue;
+
+                    if (valueChanged || isDeleted) {
+                        isRowUnchanged = false;
+
+                        // KIỂM TRA XUNG ĐỘT
+                        if (existingRow.changeStatus !== "unchanged") {
+                            conflicts.push({
+                                id: `${existingRow.id}_${lang}`,
+                                rowId: existingRow.id,
+                                namespaceId: existingRow.namespaceId,
+                                key: existingRow.key,
+                                lang,
+                                localValue: isDeleted
+                                    ? "🗑️ [DÒNG NÀY ĐANG BỊ BẠN XÓA]"
+                                    : existingRow.values[lang],
+                                incomingValue,
+                                namespacePath: nsKey,
+                            });
+                        } else {
+                            // AN TOÀN ĐỂ GHI ĐÈ CHO NGÔN NGỮ NÀY
+                            existingRow.values[lang] = incomingValue;
+                            if (!existingRow.translationStatus)
+                                existingRow.translationStatus = {};
+                            existingRow.translationStatus[lang] =
+                                getTranslationStatus(incomingValue);
+                            hasAnySafeUpdate = true;
+                        }
+                    }
+                }
+
+                if (isRowUnchanged) {
+                    unchangedCount++;
+                } else if (hasAnySafeUpdate) {
+                    existingRow.changeStatus = "updated";
+                    existingRow.updatedAt = now;
+                    rowsToUpdate.push(existingRow);
+                    updatedCount++;
+                }
+            } else {
+                // THÊM MỚI TỪ FILE IMPORT
+                const newRow: TranslationRow = {
+                    id: `${namespaceRecord.id}:${key}`,
+                    projectId,
+                    namespaceId: namespaceRecord.id,
+                    key,
+                    values: { ...langValues },
+                    originalValues: {}, // Key mới hoàn toàn
+                    translationStatus: {},
+                    changeStatus: "added",
+                    createdAt: now,
+                    updatedAt: now,
+                };
+
+                for (const [lang, val] of Object.entries(langValues)) {
+                    newRow.translationStatus[lang] = getTranslationStatus(val);
+                }
+
+                newRows.push(newRow);
+                addedCount++;
+            }
+        }
+    }
+
+    return {
+        importedCount,
+        skippedCount,
+        warnings,
+        diffSummary: {
+            added: addedCount,
+            updated: updatedCount,
+            unchanged: unchangedCount,
+            conflicted: conflicts.length,
+        },
+        pendingData: {
+            projectId,
+            detectedLanguages,
+            newNamespaces,
+            newRows,
+            rowsToUpdate,
+            conflicts,
+        },
+    };
+};
+
+// ==========================================
+// 4. PHASE 2: COMMIT + RESOLVE CONFLICTS
+// ==========================================
+export const commitImportData = async (
+    pendingData: PendingCommitData,
+    resolutions: Record<string, "local" | "incoming"> = {},
+) => {
+    const {
+        projectId,
+        detectedLanguages,
+        newNamespaces,
+        newRows,
+        rowsToUpdate,
+        conflicts,
+    } = pendingData;
+
     const project = await db.projects.get(projectId);
     if (project) {
         const newLangs = Array.from(detectedLanguages).filter(
             (l) => !project.languages.includes(l),
         );
-        if (newLangs.length > 0) {
+        if (newLangs.length > 0)
             await db.projects.update(projectId, {
                 languages: [...project.languages, ...newLangs],
             });
-        }
     }
 
-    // ==========================================
-    // BƯỚC 3: MỞ TRANSACTION ĐỂ GHI NHANH VÀO DB
-    // ==========================================
     await db.transaction("rw", db.namespaces, db.translationRows, async () => {
-        const now = new Date().toISOString();
+        // Map lưu trữ các dòng cần update (để tránh ghi đè lỗi khi có nhiều xung đột trên cùng 1 dòng)
+        const pendingMap = new Map<string, TranslationRow>();
+        newRows.forEach((r) => pendingMap.set(r.id, r));
+        rowsToUpdate.forEach((r) => pendingMap.set(r.id, r));
 
-        for (const data of parsedFilesData) {
-            const { detectedLang, folderPath, fileName, flattened } = data;
+        const resolvedUpdatesMap = new Map<string, TranslationRow>();
 
-            const existingNamespaces = await db.namespaces
-                .where({ projectId })
-                .toArray();
-            let namespace = existingNamespaces.find(
-                (ns) =>
-                    ns.folderPath === folderPath && ns.fileName === fileName,
-            );
+        for (const conflict of conflicts) {
+            const choice = resolutions[conflict.id];
+            if (!choice) continue;
 
-            if (!namespace) {
-                namespace = {
-                    id: uuidv4(),
-                    projectId,
-                    folderPath,
-                    fileName,
-                };
-                await db.namespaces.add(namespace);
-            }
+            if (choice === "incoming") {
+                // Ưu tiên lấy từ RAM nếu dòng đó có Safe Update ngôn ngữ khác, nếu không thì lấy từ DB
+                const targetRow =
+                    pendingMap.get(conflict.rowId) ||
+                    resolvedUpdatesMap.get(conflict.rowId) ||
+                    (await db.translationRows.get(conflict.rowId));
 
-            const existingRows = await db.translationRows
-                .where({ namespaceId: namespace.id })
-                .toArray();
-            const existingRowMap = new Map(
-                existingRows.map((row) => [row.key, row]),
-            );
+                if (targetRow) {
+                    targetRow.values[conflict.lang] = conflict.incomingValue;
+                    targetRow.changeStatus = "updated";
+                    if (!targetRow.translationStatus)
+                        targetRow.translationStatus = {};
+                    targetRow.translationStatus[conflict.lang] =
+                        getTranslationStatus(conflict.incomingValue);
+                    targetRow.updatedAt = new Date().toISOString();
 
-            const newRows: TranslationRow[] = [];
-            const rowsToUpdate: TranslationRow[] = [];
-
-            for (const [key, value] of Object.entries(flattened)) {
-                const existingRow = existingRowMap.get(key);
-
-                if (existingRow) {
-                    // Ghi đè vào cột ngôn ngữ detect được (không dùng cứng fallbackLangCode nữa)
-                    existingRow.values[detectedLang] = value;
-                    existingRow.originalValues[detectedLang] = value;
-
-                    if (!existingRow.translationStatus)
-                        existingRow.translationStatus = {};
-                    existingRow.translationStatus[detectedLang] =
-                        getTranslationStatus(value);
-
-                    existingRow.updatedAt = now;
-                    rowsToUpdate.push(existingRow);
-                } else {
-                    newRows.push({
-                        id: `${namespace.id}:${key}`,
-                        projectId,
-                        namespaceId: namespace!.id,
-                        key,
-                        values: { [detectedLang]: value },
-                        originalValues: { [detectedLang]: value },
-                        translationStatus: {
-                            [detectedLang]: getTranslationStatus(value),
-                        },
-                        changeStatus: "unchanged",
-                        createdAt: now,
-                        updatedAt: now,
-                    });
+                    // Nếu nó chưa nằm trong mảng Safe Update, ta phải đưa nó vào mảng Resolve để lưu
+                    if (!pendingMap.has(targetRow.id)) {
+                        resolvedUpdatesMap.set(targetRow.id, targetRow);
+                    }
                 }
             }
-
-            if (newRows.length > 0) await db.translationRows.bulkAdd(newRows);
-            if (rowsToUpdate.length > 0)
-                await db.translationRows.bulkPut(rowsToUpdate);
         }
+
+        // Đổ toàn bộ vào DB trong 1 Transaction duy nhất
+        if (newNamespaces.length > 0)
+            await db.namespaces.bulkAdd(newNamespaces);
+        if (newRows.length > 0) await db.translationRows.bulkAdd(newRows);
+        if (rowsToUpdate.length > 0)
+            await db.translationRows.bulkPut(rowsToUpdate);
+        if (resolvedUpdatesMap.size > 0)
+            await db.translationRows.bulkPut(
+                Array.from(resolvedUpdatesMap.values()),
+            );
     });
 };

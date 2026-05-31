@@ -55,50 +55,83 @@ export interface TranslationRow {
     updatedAt: string;
 }
 
-export class I18nManagerDB extends Dexie {
-    projects!: Table<Project, string>;
-    namespaces!: Table<Namespace, string>;
-    translationRows!: Table<TranslationRow, string>;
-
-    // Versions và Changes sẽ được thêm vào ở Phase 2
-    // versions!: Table<Version, string>;
-    // changes!: Table<ChangeRecord, string>;
-
-    constructor() {
-        super("I18nManagerDB");
-
-        // Định nghĩa Schema (chỉ liệt kê những field cần đánh index để search/filter)
-        this.version(1).stores({
-            projects: "id, name, updatedAt",
-            namespaces: "id, projectId, [projectId+folderPath], fileName",
-            // Compound index [projectId+namespaceId] giúp query Table cực nhanh
-            translationRows:
-                "id, projectId, namespaceId, [projectId+namespaceId], key, changeStatus, updatedAt",
-        });
-    }
+export interface SnapshotRow {
+    id: string;
+    namespaceId: string;
+    key: string;
+    values: Record<string, string>;
+    originalValues: Record<string, string>;
+    changeStatus: ChangeStatus;
+    cellMeta?: TranslationRow["cellMeta"];
 }
 
-export const updateTranslationCell = async (
+export interface VersionRecord {
+    id: string;
+    projectId: string;
+    version: string;
+    name: string;
+    description?: string;
+    type?: "snapshot" | "import" | "rollback";
+    createdAt: string;
+    updatedAt?: string;
+    rowCount: number;
+    changeCount: number;
+    snapshot: SnapshotRow[];
+}
+
+export async function updateTranslationCell(
     rowId: string,
     langCode: string,
-    newValue: string,
-) => {
+    value: string,
+) {
     const row = await db.translationRows.get(rowId);
-    if (!row) return;
 
-    const originalValue = row.originalValues[langCode] || "";
-    const isChanged = newValue !== originalValue;
+    if (!row) {
+        throw new Error("Translation row not found");
+    }
 
-    // Sửa trực tiếp trên object rồi dùng .put() đè lên
-    row.values[langCode] = newValue;
-    row.translationStatus[langCode] = newValue.trim()
+    const nextValues = {
+        ...row.values,
+        [langCode]: value,
+    };
+
+    const hasAnyChanged = Object.keys(nextValues).some((lang) => {
+        return (nextValues[lang] || "") !== (row.originalValues?.[lang] || "");
+    });
+
+    let nextChangeStatus = row.changeStatus;
+
+    if (row.changeStatus === "added" || row.changeStatus === "deleted") {
+        nextChangeStatus = row.changeStatus;
+    } else {
+        nextChangeStatus = hasAnyChanged ? "updated" : "unchanged";
+    }
+
+    const nextCellChangeStatus: ChangeStatus =
+        value !== (row.originalValues?.[langCode] || "")
+            ? "updated"
+            : "unchanged";
+
+    const nextTranslationStatus: TranslationStatus = value.trim()
         ? "translated"
         : "missing";
-    row.changeStatus = isChanged ? "updated" : "unchanged";
-    row.updatedAt = new Date().toISOString();
 
-    await db.translationRows.put(row);
-};
+    const nextCellMeta: NonNullable<TranslationRow["cellMeta"]> = {
+        ...(row.cellMeta ?? {}),
+        [langCode]: {
+            ...(row.cellMeta?.[langCode] ?? {}),
+            changeStatus: nextCellChangeStatus,
+            translationStatus: nextTranslationStatus,
+        },
+    };
+
+    await db.translationRows.update(rowId, {
+        values: nextValues,
+        cellMeta: nextCellMeta,
+        changeStatus: nextChangeStatus,
+        updatedAt: new Date().toISOString(),
+    });
+}
 
 export interface ProjectVersion {
     id: string;
@@ -108,23 +141,40 @@ export interface ProjectVersion {
     createdAt: string;
 }
 
-class I18nDatabase extends Dexie {
-    projects!: Dexie.Table<Project, string>;
-    namespaces!: Dexie.Table<Namespace, string>;
-    translationRows!: Dexie.Table<TranslationRow, string>;
-    versions!: Dexie.Table<ProjectVersion, string>; // Khai báo bảng mới
+export class I18nDatabase extends Dexie {
+    projects!: Table<Project, string>;
+    namespaces!: Table<Namespace, string>;
+    translationRows!: Table<TranslationRow, string>;
+    versions!: Table<VersionRecord, string>;
 
     constructor() {
         super("I18nManagerDB");
 
-        // 2. QUAN TRỌNG: Tăng version từ 1 lên 2.
-        // Bổ sung bảng versions vào schema.
-        this.version(2).stores({
-            projects: "id, createdAt",
-            namespaces: "id, projectId, [projectId+folderPath+fileName]",
+        this.version(1).stores({
+            projects: "id, name, updatedAt",
+            namespaces: "id, projectId, [projectId+folderPath], fileName",
             translationRows:
-                "id, projectId, namespaceId, changeStatus, [projectId+namespaceId]",
-            versions: "id, projectId, createdAt", // Đánh index để sau này query theo ngày tháng
+                "id, projectId, namespaceId, [projectId+namespaceId], key, changeStatus, updatedAt",
+        });
+
+        this.version(2).stores({
+            projects: "id, name, updatedAt",
+            namespaces:
+                "id, projectId, [projectId+folderPath], [projectId+folderPath+fileName], fileName",
+            translationRows:
+                "id, projectId, namespaceId, [projectId+namespaceId], key, changeStatus, updatedAt",
+            versions: "id, projectId, createdAt",
+        });
+
+        // BUMP VERSION 3: Bổ sung index cho bảng versions
+        this.version(3).stores({
+            projects: "id, name, updatedAt",
+            namespaces:
+                "id, projectId, [projectId+folderPath], [projectId+folderPath+fileName], fileName",
+            translationRows:
+                "id, projectId, namespaceId, [projectId+namespaceId], key, changeStatus, updatedAt",
+            versions:
+                "id, projectId, version, createdAt, [projectId+createdAt], [projectId+version]",
         });
     }
 }
