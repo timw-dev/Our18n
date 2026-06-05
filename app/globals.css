@@ -121,10 +121,27 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+
   html {
     @apply font-sans;
   }
+}
+
+@keyframes spreadsheet-flash {
+  0% {
+    background-color: rgba(59, 130, 246, 0.15);
+    /* Màu xanh nhẹ lam */
+  }
+
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-spreadsheet-flash tbody {
+  animation: spreadsheet-flash 2s cubic-bezier(0.25, 1, 0.5, 1);
 }

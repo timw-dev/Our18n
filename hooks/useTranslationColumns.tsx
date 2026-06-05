@@ -1,3 +1,5 @@
+"use client";
+
 import { TranslationCell } from "@/components/table/TranslationCell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +21,9 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
         if (!project) return [];
 
         const defaultLang = project.defaultLanguage;
-        const targetLangs = project.languages.filter((l) => l !== defaultLang);
+        // Mảng toàn bộ ngôn ngữ hiển thị theo thứ tự để tính toán colIdx chuẩn Spreadsheet
+        const allLanguages = project.languages;
+        const targetLangs = allLanguages.filter((l) => l !== defaultLang);
 
         return [
             {
@@ -42,7 +46,7 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                     const fullPath = ns ? (ns.folderPath === '/' ? ns.fileName : `${ns.folderPath}/${ns.fileName}`) : row.original.namespaceId;
 
                     return (
-                        <div className="max-w-[200px]">
+                        <div className="max-w-[200px] p-1">
                             <div className="font-mono text-[13px] font-semibold truncate text-primary/90">
                                 {row.original.key}
                             </div>
@@ -61,11 +65,14 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                 accessorFn: (row: TranslationRow) => row.values[defaultLang],
                 header: `Gốc (${defaultLang.toUpperCase()})`,
                 cell: ({ row }: { row: Row<TranslationRow> }) => {
-                    // Đổi thẻ tĩnh thành TranslationCell để mở khóa chỉnh sửa
+                    // Loại bỏ hoàn toàn div bọc ngoài lãng phí để Cell chiếm trọn không gian thẻ td
                     return (
-                        <div className="min-w-[250px]">
-                            <TranslationCell row={row.original} langCode={defaultLang} />
-                        </div>
+                        <TranslationCell
+                            row={row.original}
+                            langCode={defaultLang}
+                            rowIdx={row.index}
+                            colIdx={allLanguages.indexOf(defaultLang)}
+                        />
                     );
                 },
             },
@@ -74,9 +81,12 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                 accessorFn: (row: TranslationRow) => row.values[langCode],
                 header: `Bản dịch (${langCode.toUpperCase()})`,
                 cell: ({ row }: { row: Row<TranslationRow> }) => (
-                    <div className="min-w-[250px]">
-                        <TranslationCell row={row.original} langCode={langCode} />
-                    </div>
+                    <TranslationCell
+                        row={row.original}
+                        langCode={langCode}
+                        rowIdx={row.index}
+                        colIdx={allLanguages.indexOf(langCode)}
+                    />
                 ),
             })),
             {
@@ -88,16 +98,16 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                     const changeStatus = row.original.changeStatus;
 
                     return (
-                        <div className="flex flex-col items-center gap-1 pt-1">
+                        <div className="flex items-center justify-center h-full w-full min-h-12.5">
                             {isMissing && (
-                                <Badge variant="destructive" className="text-[10px] h-4 px-1.5 rounded-sm bg-red-500/90 hover:bg-red-500">
+                                <Badge variant="destructive" className="text-base h-6 px-2.5 rounded-sm bg-red-500/90 hover:bg-red-500">
                                     Missing
                                 </Badge>
                             )}
                             {changeStatus !== "unchanged" && (
                                 <Badge
                                     variant={changeStatus === "added" ? "default" : changeStatus === "deleted" ? "destructive" : "secondary"}
-                                    className={`text-[10px] h-4 px-1.5 rounded-sm ${changeStatus === 'updated' ? 'bg-amber-500/10 text-amber-600 border-amber-200' : ''}`}
+                                    className={`text-base h-6 px-2.5 rounded-sm ${changeStatus === 'updated' ? 'bg-amber-500/10 text-amber-600 border-amber-200' : ''}`}
                                 >
                                     {changeStatus === "added" ? "New" : changeStatus === "deleted" ? "Deleted" : "Updated"}
                                 </Badge>
@@ -106,7 +116,6 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                     );
                 },
             },
-            // THÊM CỘT ACTIONS (XÓA)
             {
                 id: "actions",
                 header: "",
@@ -116,7 +125,6 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
 
                     const handleToggleDelete = async () => {
                         try {
-                            // Logic thông minh: Nếu hoàn tác, kiểm tra xem trước khi xóa nó có từng bị sửa (updated) không
                             let revertStatus: "unchanged" | "updated" = "unchanged";
                             if (isDeleted) {
                                 const isChanged = Object.keys(row.original.values).some(
