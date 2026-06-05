@@ -10,7 +10,7 @@ All project data is stored locally in your browser using IndexedDB (Dexie.js).
 
 # Current Status
 
-Version: **v0.2.0-beta**
+Version: **v0.3.0-beta**
 
 Deployment: Vercel
 
@@ -34,7 +34,7 @@ Most translation tools are either:
 Our18n focuses on:
 
 - Local-first workflow
-- Fast editing experience
+- Advanced Spreadsheet-like Editing Experience
 - Importing existing i18n projects
 - Version snapshots
 - Conflict resolution
@@ -42,15 +42,16 @@ Our18n focuses on:
 
 ---
 
-# Features
+# Core Features
 
 ## Project Management
 
 - Multiple local projects
 - Project switching
 - Project isolation
+- Local-only workspace
 
-## Smart Import
+## Smart Import v2
 
 Supports:
 
@@ -78,25 +79,29 @@ Automatic:
 
 - Language detection
 - Namespace detection
-- Merge existing languages
+- Language merging
+- Nested locale support
 
 ## Translation Workspace
 
 - Dynamic language columns
 - Edit all languages
 - Search
-- Filters
+- Namespace filters
 - Change tracking
+- Missing translation tracking
 
 ## Conflict Resolution
 
 Git-style import workflow:
 
+```txt
 Import
 → Preview
 → Conflict Detection
 → Resolve
 → Apply
+```
 
 Supported actions:
 
@@ -104,13 +109,14 @@ Supported actions:
 - Use Incoming
 - Skip
 
-## Version Control
+## Snapshot Version Control
 
 - Create Snapshot
 - Version History
-- Compare Versions
 - Rollback
 - Delete Snapshot
+- Version Metadata
+- Change Tracking
 
 ## Compare View
 
@@ -125,12 +131,13 @@ Supports:
 - Added changes
 - Removed changes
 - Modified changes
+- Version-to-version comparison
 
 ## Export
 
-Export current working copy as ZIP.
+Export current workspace as ZIP.
 
-Structure example:
+Example output:
 
 ```txt
 en/common.json
@@ -144,74 +151,236 @@ ko/auth/login.json
 
 ---
 
+# Spreadsheet Editing Experience (v0.3.0)
+
+Our18n now behaves much closer to Excel and Google Sheets.
+
+## Keyboard Navigation
+
+- Arrow key navigation
+- Tab / Shift + Tab navigation
+- Enter to edit
+- Direct typing to replace content
+- Spreadsheet-style cell focus
+
+## Multi-cell Copy & Paste
+
+Supports:
+
+- Excel
+- Google Sheets
+- LibreOffice
+- Our18n
+
+Examples:
+
+Single-column paste
+
+```txt
+Xin chào
+Tạm biệt
+Cảm ơn
+```
+
+Multi-column paste
+
+```txt
+Hello    Xin chào
+Logout   Đăng xuất
+```
+
+Matrix-based TSV import supported.
+
+## Undo / Redo
+
+Supported shortcuts:
+
+```txt
+Ctrl + Z
+Ctrl + Y
+Ctrl + Shift + Z
+```
+
+Tracked operations:
+
+- Edit
+- Delete
+- Paste
+- Batch updates
+
+## TranslationCell Upgrade
+
+Translation cells now support:
+
+- Multi-line editing
+- Auto-growing textarea
+- Better readability
+- Long text handling
+- Reduced overflow issues
+
+## Selection Improvements
+
+- Spreadsheet range selection
+- Shift + Click support
+- Cleaner visual highlighting
+- Native browser text-selection suppression
+
+## Clipboard System
+
+Centralized clipboard handling:
+
+- Global copy/paste
+- Hidden focus shield
+- Reliable browser compatibility
+
+---
+
 # Technology Stack
 
-Framework
+## Framework
 
 - Next.js
 - React
 - TypeScript
 
-UI
+## UI
 
 - Tailwind CSS
 - Shadcn UI
 - Radix UI
 - Lucide Icons
 
-Data
+## Data
 
 - Dexie.js
 - IndexedDB
 
-Table
+## Table Engine
 
 - TanStack Table
 
-State
+## State
 
 - Zustand
 
-Export
+## Export
 
 - JSZip
 
-Notifications
+## Notifications
 
 - Sonner
 
 ---
 
-# Roadmap
+# Architecture
 
-## v0.3.x
+## Local-first Philosophy
 
-Planned:
+Current workflow:
 
-- Better Version Manager
-- Snapshot Cleanup Policy
-- Backup / Restore Project Package
-- Project Dashboard
+```txt
+Import
+→ Edit
+→ Resolve Conflicts
+→ Snapshot
+→ Compare
+→ Export
+```
 
-## v0.4.x
+No backend required.
 
-Planned:
+No cloud dependency required.
 
-- Google Login
-- Supabase Integration
-- Remote Projects
+All project data remains on the user's machine.
 
-## v0.5.x
+## Database Structure
 
-Planned:
+### projects
 
-- Team Workspace
-- Cloud Sync
-- Shared Projects
+Project metadata.
+
+### namespaces
+
+File-level organization.
+
+Examples:
+
+```txt
+common.json
+auth/login.json
+dashboard/home.json
+```
+
+### translationRows
+
+Current working copy.
+
+Tracks:
+
+- values
+- originalValues
+- changeStatus
+
+### versions
+
+Snapshot history.
+
+Stores:
+
+- version metadata
+- timestamps
+- snapshot state
 
 ---
 
 # Release Notes
+
+## v0.3.0-beta
+
+Spreadsheet Workspace Upgrade
+
+### Added
+
+- Spreadsheet navigation
+- Multi-cell copy
+- Multi-cell paste
+- Undo / Redo
+- Spreadsheet selection model
+- Improved TranslationCell UX
+- Auto-growing textarea
+- Clipboard infrastructure
+- Missing value handling
+- Performance improvements
+
+### Improved
+
+- Large translation workflow
+- Excel compatibility
+- Google Sheets compatibility
+- Editing experience
+- Focus management
+
+---
+
+## v0.2.0-beta
+
+Local-first Versioned Workspace
+
+### Added
+
+- Smart Import v2
+- Nested locales support
+- JavaScript translation file support
+- Automatic language detection
+- Conflict Resolution Workflow
+- Snapshot System
+- Version History
+- Rollback
+- Compare Page
+- ZIP Export
+
+---
 
 ## v0.1.0-beta
 
@@ -222,75 +391,51 @@ Initial Local-first MVP
 - Project Management
 - Translation Table
 - JSON Import
-- Export Foundation
 - Dexie Database
 - Dynamic Language Columns
 - Search & Filtering
-
-### Infrastructure
-
-- Vercel Deployment
-- PWA Foundation
-- Public Repository
+- Export Foundation
 
 ---
 
-## v0.2.0-beta
+# Roadmap
 
-Local-first Versioned Workspace
+## v0.4.x
 
-### Smart Import v2
+Planned:
 
-- Nested locales support
-- JSON import improvements
-- JavaScript translation file support
-- Automatic language detection
-- Automatic namespace detection
+- Project Package Backup (.our18n)
+- Restore Project Package
+- Snapshot Retention Policy
+- Workspace Dashboard
+- Translation Analytics
 
-### Conflict Resolution
+## v0.5.x
 
-- Import Preview
-- Conflict Detection
-- Git-style Merge Workflow
-- Selective Apply
+Planned:
 
-### Version Control
+- Google Login
+- Supabase Integration
+- Remote Projects
 
-- Snapshot System
-- Version History
-- Rollback Support
-- Snapshot Cleanup
+## v0.6.x
 
-### Compare
+Planned:
 
-- Dedicated Compare Page
-- Diff Engine
-- Version Comparison
+- Team Workspace
+- Shared Projects
+- Manual Sync
+- Cross-device Conflict Resolution
 
-### Export
+## v1.0
 
-- ZIP Export
-- Nested Namespace Reconstruction
-- Export Current Workspace
+Target Vision:
 
----
-
-# Philosophy
-
-Our18n follows a Local-first Architecture.
-
-Current workflow:
-
-Import
-→ Edit
-→ Resolve Conflicts
-→ Snapshot
-→ Compare
-→ Export
-
-Cloud synchronization will be introduced later without sacrificing the local-first experience.
-
-Dexie remains the primary working copy even after future cloud integration.
+- Local-first Translation Workspace
+- Spreadsheet Editing Experience
+- Snapshot Version Control
+- Team Collaboration
+- Cloud Synchronization
 
 ---
 

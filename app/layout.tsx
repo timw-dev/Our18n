@@ -16,22 +16,48 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// 1. Gắn bộ Metadata chuẩn SEO vào đây
 export const metadata: Metadata = {
-  title: "Our18n(beta) | I18For Our Translator",
-  description: "Công cụ quản lý và chỉnh sửa tệp JSON ngôn ngữ (i18n) hoàn toàn offline. Tối ưu trải nghiệm dịch thuật cho Developer và Translator.",
+  title: "Our18n | Local-first Translation Workspace",
+
+  description:
+    "Manage, edit, compare, and version your localization files in a fast local-first workspace. Import JSON and JavaScript i18n projects, review changes, create snapshots, and export translations — all directly in your browser.",
+
   applicationName: "Our18n",
-  authors: [{ name: "Đoàn Minh Hào", url: "https://github.com/doanminhhao" }], // Thay bằng link Github của bạn
-  keywords: ["i18n", "localization", "translation editor", "json editor", "local-first"],
+
+  authors: [
+    {
+      name: "Timw",
+      url: "https://github.com/timw-dev",
+    },
+  ],
+  keywords: [
+    "i18n",
+    "localization",
+    "translation management",
+    "translation workspace",
+    "translation editor",
+    "json editor",
+    "local-first",
+    "offline translation",
+    "internationalization",
+    "react i18n",
+    "nextjs i18n",
+    "language management",
+    "spreadsheet translation",
+  ],
   openGraph: {
-    title: "Our18n v0.2.0 beta | Local-first I18n Editor",
-    description: "Quản lý và chỉnh sửa tệp JSON ngôn ngữ hoàn toàn offline.",
+    title: "Our18n v0.3.0 Beta | Local-first Translation Workspace",
+    description:
+      "A local-first workspace for managing localization files. Import, edit, compare, snapshot, and export translations directly in your browser.",
     url: "https://our18n.vercel.app",
     siteName: "Our18n",
     type: "website",
+
   },
+
   manifest: "/manifest.json",
 };
+
 
 // 2. Tách themeColor ra chuẩn Next.js 14+
 export const viewport: Viewport = {

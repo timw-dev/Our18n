@@ -41,9 +41,13 @@ export default function Home() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b pb-4">
         <div className="space-y-4 flex flex-col items-center justify-center w-full text-center">
           <div className="space-y-1">
-            <h1 className="text-3xl font-bold tracking-tight">Our18n v0.2.0 beta - I18n For Our Translator</h1>
-            <p className="text-muted-foreground">
-              Quản lý và chỉnh sửa tệp ngôn ngữ hoàn toàn offline.
+            <h1 className="text-3xl font-bold tracking-tight">
+              Our18n v0.3.0 Beta
+            </h1>
+
+            <p className="text-muted-foreground max-w-2xl">
+              Không gian làm việc dành cho quản lý và chỉnh sửa tệp đa ngôn ngữ.
+              Nhập dữ liệu, chỉnh sửa, so sánh phiên bản và xuất file trực tiếp trên trình duyệt.
             </p>
           </div>
 
@@ -60,7 +64,7 @@ export default function Home() {
             className="gap-2"
           >
             <Upload className="w-4 h-4" />
-            Import JSON
+            Import Folders
           </Button>
         )}
       </div>
@@ -69,9 +73,12 @@ export default function Home() {
       {!activeProjectId && (
         <div className="flex flex-1 items-center justify-center border-2 border-dashed rounded-lg bg-muted/10 p-12 text-center">
           <div className="space-y-3">
-            <h3 className="text-lg font-semibold">Chào mừng đến với Our18n</h3>
-            <p className="text-muted-foreground max-w-sm mx-auto">
-              Tạo một dự án mới ở thanh công cụ phía trên để bắt đầu hành trình bản địa hóa của bạn.
+            <h3 className="text-lg font-semibold">
+              Tạo dự án đầu tiên
+            </h3>
+
+            <p className="text-muted-foreground max-w-md mx-auto">
+              Tạo một dự án mới, sau đó nhập các folders chứa tệp ngôn ngữ JSON hoặc JavaScript để bắt đầu làm việc.
             </p>
           </div>
         </div>
