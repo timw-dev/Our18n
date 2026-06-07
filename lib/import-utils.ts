@@ -403,6 +403,8 @@ export const analyzeImportedFiles = async (
         });
     }
 
+    previewRows.sort((a, b) => a.key.localeCompare(b.key));
+
     return {
         importedCount,
         skippedCount,
@@ -420,7 +422,7 @@ export const analyzeImportedFiles = async (
             newRows,
             rowsToUpdate,
             conflicts,
-            previewRows, // Trả về mảng dòng sạch sẽ phục vụ giao diện Spreadsheet
+            previewRows,
         },
     };
 };
