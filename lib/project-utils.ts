@@ -25,29 +25,22 @@ export const renameProject = async (projectId: string, newName: string) => {
     });
 };
 
-export const clearProjectData = async (projectId: string) => {
-    // Giữ lại Project Info, chỉ xóa Data (Namespaces, Rows, Versions)
-    // Và reset mảng languages về lại duy nhất ngôn ngữ default
+export async function clearProjectData(projectId: string): Promise<void> {
     await db.transaction(
         "rw",
-        db.projects,
-        db.namespaces,
-        db.translationRows,
-        db.versions,
+        [db.translationRows, db.namespaces, db.versions],
         async () => {
+            // 1. Xóa sạch hàng dịch
             await db.translationRows.where({ projectId }).delete();
-            await db.namespaces.where({ projectId }).delete();
-            await db.versions.where({ projectId }).delete();
 
-            const project = await db.projects.get(projectId);
-            if (project) {
-                await db.projects.update(projectId, {
-                    languages: [project.defaultLanguage],
-                });
-            }
+            // 2. Xóa sạch cấu trúc tệp tin của dự án này (Để lần sau import tính lại từ đầu)
+            await db.namespaces.where({ projectId }).delete();
+
+            // 3. Xóa sạch lịch sử snapshot
+            await db.versions.where({ projectId }).delete();
         },
     );
-};
+}
 
 export const deleteProject = async (projectId: string) => {
     // Xóa sạch bách (Cascade Delete)

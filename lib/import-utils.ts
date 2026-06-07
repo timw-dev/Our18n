@@ -4,7 +4,55 @@ import { flattenJSON } from "./json-utils";
 import { getTranslationStatus } from "./translation-utils";
 
 // ==========================================
-// 1. HÀM BÓC TÁCH FILE JS (ES6 / CommonJS)
+// THÊM MỚI: ĐỊNH NGHĨA CẤU TRÚC PREVIEW ROW THEO KEY (STEP 1)
+// ==========================================
+export interface PreviewRow {
+    id: string; // ID dòng dịch thuật tương ứng
+    namespaceId: string; // ID của namespace chứa key này
+    namespacePath: string; // Đường dẫn file thân thiện (VD: auth/login.json)
+    key: string; // Từ khóa bản dịch
+    values: Record<string, string>; // Tập hợp song song đa ngôn ngữ { en: "...", vi: "..." }
+    localValues?: Record<string, string>; // Giá trị cũ đang có trên máy (phục vụ đối chiếu khi update/conflict)
+    status: "added" | "updated" | "deleted" | "conflicted"; // Trạng thái gom nhóm của dòng
+}
+
+export interface ConflictItem {
+    id: string;
+    rowId: string;
+    namespaceId: string;
+    key: string;
+    lang: string;
+    localValue: string;
+    incomingValue: string;
+    namespacePath: string;
+}
+
+// Cấu trúc dữ liệu Commit được nâng cấp để ôm thêm mảng previewRows chuẩn hóa
+export interface PendingCommitData {
+    projectId: string;
+    detectedLanguages: Set<string>;
+    newNamespaces: Namespace[];
+    newRows: TranslationRow[];
+    rowsToUpdate: TranslationRow[];
+    conflicts: ConflictItem[];
+    previewRows: PreviewRow[]; // MỚI: Mảng dữ liệu theo dòng phục vụ Mini Spreadsheet UI
+}
+
+export interface ImportPreviewResult {
+    importedCount: number;
+    skippedCount: number;
+    warnings: string[];
+    diffSummary: {
+        added: number;
+        updated: number;
+        unchanged: number;
+        conflicted: number;
+    };
+    pendingData: PendingCommitData | null;
+}
+
+// ==========================================
+// 1. HÀM BÓC TÁCH FILE JS (ES6 / CommonJS) - GIỮ NGUYÊN
 // ==========================================
 const parseJavaScriptTranslation = (fileContent: string) => {
     try {
@@ -27,7 +75,7 @@ const parseJavaScriptTranslation = (fileContent: string) => {
 };
 
 // ==========================================
-// 2. HÀM DETECT LANGUAGE & NAMESPACE
+// 2. HÀM DETECT LANGUAGE & NAMESPACE - GIỮ NGUYÊN
 // ==========================================
 export const detectLanguageAndNamespace = (
     filePath: string,
@@ -60,43 +108,8 @@ export const detectLanguageAndNamespace = (
     return { lang: detectedLang, folderPath, fileName, namespace };
 };
 
-// ... (Các hàm parseJS và detectLanguageAndNamespace phía trên GIỮ NGUYÊN)
-
-export interface ConflictItem {
-    id: string;
-    rowId: string;
-    namespaceId: string;
-    key: string;
-    lang: string;
-    localValue: string;
-    incomingValue: string;
-    namespacePath: string;
-}
-
-export interface PendingCommitData {
-    projectId: string;
-    detectedLanguages: Set<string>;
-    newNamespaces: Namespace[];
-    newRows: TranslationRow[];
-    rowsToUpdate: TranslationRow[];
-    conflicts: ConflictItem[]; // Thêm mảng chứa các xung đột
-}
-
-export interface ImportPreviewResult {
-    importedCount: number;
-    skippedCount: number;
-    warnings: string[];
-    diffSummary: {
-        added: number;
-        updated: number;
-        unchanged: number;
-        conflicted: number;
-    };
-    pendingData: PendingCommitData | null;
-}
-
 // ==========================================
-// 3. PHASE 1: ANALYZE & DIFF ENGINE
+// 3. PHASE 1: ANALYZE & DIFF ENGINE (NÂNG CẤP MODEL)
 // ==========================================
 export const analyzeImportedFiles = async (
     projectId: string,
@@ -183,7 +196,7 @@ export const analyzeImportedFiles = async (
         };
     }
 
-    // --- BƯỚC 1.5: GOM NHÓM DỮ LIỆU TỪ NHIỀU FILE (Tránh duplicate id và conflict giả) ---
+    // --- BƯỚC 1.5: GOM NHÓM DỮ LIỆU TỪ NHIỀU FILE ---
     const incomingData = new Map<string, Map<string, Record<string, string>>>();
     const namespaceMeta = new Map<
         string,
@@ -224,6 +237,8 @@ export const analyzeImportedFiles = async (
         existingNamespaces.map((ns) => [`${ns.folderPath}/${ns.fileName}`, ns]),
     );
 
+    let currentNamespaceOrder = existingNamespaces.length;
+
     for (const [nsKey, keyMap] of incomingData.entries()) {
         const meta = namespaceMeta.get(nsKey)!;
 
@@ -234,17 +249,21 @@ export const analyzeImportedFiles = async (
                 projectId,
                 folderPath: meta.folderPath,
                 fileName: meta.fileName,
+                orderIndex: currentNamespaceOrder,
             };
+            currentNamespaceOrder++;
             namespaceMap.set(nsKey, namespaceRecord);
             newNamespaces.push(namespaceRecord);
         }
 
         const existingRows = await db.translationRows
-            .where({ namespaceId: namespaceRecord.id })
+            .where({ projectId, namespaceId: namespaceRecord.id })
             .toArray();
         const existingRowMap = new Map(
             existingRows.map((row) => [row.key, row]),
         );
+
+        let currentKeyOrder = existingRows.length;
 
         for (const [key, langValues] of keyMap.entries()) {
             const existingRow = existingRowMap.get(key);
@@ -263,7 +282,6 @@ export const analyzeImportedFiles = async (
                     if (valueChanged || isDeleted) {
                         isRowUnchanged = false;
 
-                        // KIỂM TRA XUNG ĐỘT
                         if (existingRow.changeStatus !== "unchanged") {
                             conflicts.push({
                                 id: `${existingRow.id}_${lang}`,
@@ -278,7 +296,6 @@ export const analyzeImportedFiles = async (
                                 namespacePath: nsKey,
                             });
                         } else {
-                            // AN TOÀN ĐỂ GHI ĐÈ CHO NGÔN NGỮ NÀY
                             existingRow.values[lang] = incomingValue;
                             if (!existingRow.translationStatus)
                                 existingRow.translationStatus = {};
@@ -298,19 +315,20 @@ export const analyzeImportedFiles = async (
                     updatedCount++;
                 }
             } else {
-                // THÊM MỚI TỪ FILE IMPORT
                 const newRow: TranslationRow = {
                     id: `${namespaceRecord.id}:${key}`,
                     projectId,
                     namespaceId: namespaceRecord.id,
                     key,
                     values: { ...langValues },
-                    originalValues: {}, // Key mới hoàn toàn
+                    originalValues: { ...langValues },
                     translationStatus: {},
                     changeStatus: "added",
+                    orderIndex: currentKeyOrder,
                     createdAt: now,
                     updatedAt: now,
                 };
+                currentKeyOrder++;
 
                 for (const [lang, val] of Object.entries(langValues)) {
                     newRow.translationStatus[lang] = getTranslationStatus(val);
@@ -320,6 +338,69 @@ export const analyzeImportedFiles = async (
                 addedCount++;
             }
         }
+    }
+
+    // ==========================================
+    // MỚI (STEP 1): ÁNH XẠ SANG MẢNG PREVIEWROWS CHUẨN HÓA THEO KEY
+    // ==========================================
+    const previewRows: PreviewRow[] = [];
+    const idToNsPath = new Map<string, string>();
+    existingNamespaces.forEach((n) =>
+        idToNsPath.set(n.id, `${n.folderPath}/${n.fileName}`),
+    );
+    newNamespaces.forEach((n) =>
+        idToNsPath.set(n.id, `${n.folderPath}/${n.fileName}`),
+    );
+
+    // 1. Ánh xạ các dòng thêm mới
+    newRows.forEach((r) => {
+        previewRows.push({
+            id: r.id,
+            namespaceId: r.namespaceId,
+            namespacePath: idToNsPath.get(r.namespaceId) || "common.json",
+            key: r.key,
+            values: { ...r.values },
+            status: "added",
+        });
+    });
+
+    // 2. Ánh xạ các dòng cập nhật an toàn
+    rowsToUpdate.forEach((r) => {
+        previewRows.push({
+            id: r.id,
+            namespaceId: r.namespaceId,
+            namespacePath: idToNsPath.get(r.namespaceId) || "common.json",
+            key: r.key,
+            values: { ...r.values },
+            localValues: { ...r.originalValues },
+            status: "updated",
+        });
+    });
+
+    // 3. Ánh xạ các dòng có xung đột văn bản (Nhóm theo Key, gộp chung các ngôn ngữ conflict)
+    const conflictRowIds = Array.from(new Set(conflicts.map((c) => c.rowId)));
+    for (const rId of conflictRowIds) {
+        const rowConflicts = conflicts.filter((c) => c.rowId === rId);
+        if (rowConflicts.length === 0) continue;
+
+        const baseConflict = rowConflicts[0];
+        const combinedIncoming: Record<string, string> = {};
+        const combinedLocal: Record<string, string> = {};
+
+        rowConflicts.forEach((c) => {
+            combinedIncoming[c.lang] = c.incomingValue;
+            combinedLocal[c.lang] = c.localValue;
+        });
+
+        previewRows.push({
+            id: rId,
+            namespaceId: baseConflict.namespaceId,
+            namespacePath: baseConflict.namespacePath,
+            key: baseConflict.key,
+            values: combinedIncoming,
+            localValues: combinedLocal,
+            status: "conflicted",
+        });
     }
 
     return {
@@ -339,12 +420,13 @@ export const analyzeImportedFiles = async (
             newRows,
             rowsToUpdate,
             conflicts,
+            previewRows, // Trả về mảng dòng sạch sẽ phục vụ giao diện Spreadsheet
         },
     };
 };
 
 // ==========================================
-// 4. PHASE 2: COMMIT + RESOLVE CONFLICTS
+// 4. PHASE 2: COMMIT + RESOLVE CONFLICTS (CẬP NHẬT ĐỂ LƯU DATA INLINE EDIT)
 // ==========================================
 export const commitImportData = async (
     pendingData: PendingCommitData,
@@ -357,6 +439,7 @@ export const commitImportData = async (
         newRows,
         rowsToUpdate,
         conflicts,
+        previewRows = [], // Lấy mảng previewRows chứa dữ liệu đã sửa tay
     } = pendingData;
 
     const project = await db.projects.get(projectId);
@@ -371,34 +454,66 @@ export const commitImportData = async (
     }
 
     await db.transaction("rw", db.namespaces, db.translationRows, async () => {
-        // Map lưu trữ các dòng cần update (để tránh ghi đè lỗi khi có nhiều xung đột trên cùng 1 dòng)
+        // Tạo Map chứa các dòng từ core
         const pendingMap = new Map<string, TranslationRow>();
-        newRows.forEach((r) => pendingMap.set(r.id, r));
-        rowsToUpdate.forEach((r) => pendingMap.set(r.id, r));
+
+        // CẬP NHẬT: Ưu tiên lấy giá trị từ previewRows (vì có thể đã được người dùng sửa typo)
+        newRows.forEach((r) => {
+            const previewVersion = previewRows.find((p) => p.id === r.id);
+            if (previewVersion) {
+                r.values = { ...previewVersion.values };
+                // Đối với hàng thêm mới, giá trị originalValues cũng phải đi theo giá trị sau cùng
+                r.originalValues = { ...previewVersion.values };
+
+                // Cập nhật lại mốc trạng thái dịch thuật level cell
+                Object.entries(r.values).forEach(([lang, val]) => {
+                    r.translationStatus[lang] = getTranslationStatus(val);
+                });
+            }
+            pendingMap.set(r.id, r);
+        });
+
+        rowsToUpdate.forEach((r) => {
+            const previewVersion = previewRows.find((p) => p.id === r.id);
+            if (previewVersion) {
+                r.values = { ...previewVersion.values };
+                Object.entries(r.values).forEach(([lang, val]) => {
+                    if (!r.translationStatus) r.translationStatus = {};
+                    r.translationStatus[lang] = getTranslationStatus(val);
+                });
+            }
+            pendingMap.set(r.id, r);
+        });
 
         const resolvedUpdatesMap = new Map<string, TranslationRow>();
 
+        // Xử lý các dòng conflict truyền thống dựa trên bảng lựa chọn resolutions gửi lên
         for (const conflict of conflicts) {
             const choice = resolutions[conflict.id];
             if (!choice) continue;
 
             if (choice === "incoming") {
-                // Ưu tiên lấy từ RAM nếu dòng đó có Safe Update ngôn ngữ khác, nếu không thì lấy từ DB
                 const targetRow =
                     pendingMap.get(conflict.rowId) ||
                     resolvedUpdatesMap.get(conflict.rowId) ||
                     (await db.translationRows.get(conflict.rowId));
 
                 if (targetRow) {
-                    targetRow.values[conflict.lang] = conflict.incomingValue;
+                    // Nếu trong previewRows có bản sửa tay, lấy bản sửa tay, nếu không lấy incomingValue gốc
+                    const previewVersion = previewRows.find(
+                        (p) => p.id === conflict.rowId,
+                    );
+                    targetRow.values[conflict.lang] = previewVersion
+                        ? previewVersion.values[conflict.lang]
+                        : conflict.incomingValue;
+
                     targetRow.changeStatus = "updated";
                     if (!targetRow.translationStatus)
                         targetRow.translationStatus = {};
                     targetRow.translationStatus[conflict.lang] =
-                        getTranslationStatus(conflict.incomingValue);
+                        getTranslationStatus(targetRow.values[conflict.lang]);
                     targetRow.updatedAt = new Date().toISOString();
 
-                    // Nếu nó chưa nằm trong mảng Safe Update, ta phải đưa nó vào mảng Resolve để lưu
                     if (!pendingMap.has(targetRow.id)) {
                         resolvedUpdatesMap.set(targetRow.id, targetRow);
                     }
@@ -406,7 +521,7 @@ export const commitImportData = async (
             }
         }
 
-        // Đổ toàn bộ vào DB trong 1 Transaction duy nhất
+        // Thực thi ghi dữ liệu đồng loạt vào IndexedDB
         if (newNamespaces.length > 0)
             await db.namespaces.bulkAdd(newNamespaces);
         if (newRows.length > 0) await db.translationRows.bulkAdd(newRows);

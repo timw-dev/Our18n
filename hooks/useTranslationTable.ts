@@ -1,3 +1,5 @@
+"use no memo"; // Giải quyết dứt điểm cảnh báo Compilation Skipped của React Compiler
+
 import { useState } from "react";
 import {
     useReactTable,

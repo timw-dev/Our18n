@@ -7,7 +7,8 @@ import { toast } from "sonner";
 
 import { db } from "@/lib/db";
 import { useAppStore } from "@/app/store/useAppStore";
-import { createProject, renameProject, clearProjectData, deleteProject } from "@/lib/project-utils";
+// Import hàm clearProjectData mới từ utils vào đây
+import { createProject, renameProject, deleteProject, clearProjectData } from "@/lib/project-utils";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,35 +34,32 @@ export function ProjectSwitcher() {
     const projects = useLiveQuery(() => db.projects.toArray()) || [];
     const activeProject = projects.find(p => p.id === activeProjectId);
 
-    // State quản lý Dialogs (Dùng chung 1 state để tối ưu DOM)
     const [dialogMode, setDialogMode] = useState<'new' | 'rename' | 'clear' | 'delete' | null>(null);
     const [inputValue, setInputValue] = useState("");
 
     const handleAction = async () => {
         try {
             if (dialogMode === 'new') {
-                if (!inputValue.trim()) return toast.error("Tên dự án không được để trống");
-                const newId = await createProject(inputValue.trim(), 'en'); // Mặc định EN cho MVP
+                if (!inputValue.trim()) return toast.error("Tên không được để trống");
+                const newId = await createProject(inputValue.trim(), 'en');
                 setActiveProject(newId);
-                toast.success("Tạo dự án thành công!");
+                toast.success("Tạo không gian làm việc mới thành công!");
             }
             else if (dialogMode === 'rename' && activeProjectId) {
-                if (!inputValue.trim()) return toast.error("Tên dự án không được để trống");
+                if (!inputValue.trim()) return toast.error("Tên không được để trống");
                 await renameProject(activeProjectId, inputValue.trim());
                 toast.success("Đổi tên thành công!");
             }
+            // Gọi qua tầng core utils xử lý db, UI không can thiệp logic dữ liệu sâu
             else if (dialogMode === 'clear' && activeProjectId) {
                 await clearProjectData(activeProjectId);
-                toast.success("Đã dọn dẹp sạch dữ liệu dự án!");
+                toast.success("Đã xóa sạch toàn bộ nội dung bản dịch của dự án này!");
             }
             else if (dialogMode === 'delete' && activeProjectId) {
                 await deleteProject(activeProjectId);
                 const remaining = projects.filter(p => p.id !== activeProjectId);
-
-                // Đổi null thành chuỗi rỗng ""
                 setActiveProject(remaining.length > 0 ? remaining[0].id : "");
-
-                toast.success("Đã xóa dự án!");
+                toast.success("Đã xóa dự án thành công!");
             }
 
             setDialogMode(null);
@@ -90,7 +88,6 @@ export function ProjectSwitcher() {
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="w-60" align="start">
-                    {/* Danh sách Project */}
                     {projects.map((p) => (
                         <DropdownMenuItem
                             key={p.id}
@@ -104,53 +101,50 @@ export function ProjectSwitcher() {
 
                     <DropdownMenuSeparator />
 
-                    {/* Actions cho Project hiện tại */}
                     {activeProject && (
                         <>
                             <DropdownMenuItem onClick={() => openDialog('rename', activeProject.name)} className="cursor-pointer">
                                 <Edit2 className="w-4 h-4 mr-2 text-muted-foreground" />
-                                Đổi tên
+                                Đổi tên dự án
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openDialog('clear')} className="cursor-pointer text-amber-600 focus:text-amber-600">
                                 <Eraser className="w-4 h-4 mr-2" />
-                                Clear dữ liệu
+                                Xóa sạch nội dung dịch
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openDialog('delete')} className="cursor-pointer text-red-600 focus:text-red-600">
                                 <Trash2 className="w-4 h-4 mr-2" />
-                                Xóa dự án
+                                Xóa bỏ dự án này
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                         </>
                     )}
 
-                    {/* Tạo mới */}
                     <DropdownMenuItem onClick={() => openDialog('new')} className="cursor-pointer font-medium text-primary">
                         <PlusCircle className="w-4 h-4 mr-2" />
-                        Dự án mới...
+                        Tạo dự án mới...
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Unified Dialog Xử lý mọi nghiệp vụ */}
             <Dialog open={!!dialogMode} onOpenChange={(open) => !open && setDialogMode(null)}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>
-                            {dialogMode === 'new' && "Tạo dự án mới"}
+                            {dialogMode === 'new' && "Tạo không gian dự án mới"}
                             {dialogMode === 'rename' && "Đổi tên dự án"}
-                            {dialogMode === 'clear' && "Clear dữ liệu dự án"}
-                            {dialogMode === 'delete' && "Xóa dự án"}
+                            {dialogMode === 'clear' && "Xóa toàn bộ nội dung dịch thuật"}
+                            {dialogMode === 'delete' && "Xóa bỏ hoàn toàn dự án"}
                         </DialogTitle>
                         <DialogDescription>
-                            {dialogMode === 'clear' && "Bạn có chắc muốn xóa toàn bộ data đã import và dịch? Hành động này không thể hoàn tác."}
-                            {dialogMode === 'delete' && "Dự án và toàn bộ dữ liệu bên trong sẽ bị xóa vĩnh viễn. Không thể khôi phục!"}
+                            {dialogMode === 'clear' && "Hành động này sẽ làm trống toàn bộ bảng dịch hiện tại, bao gồm cả nội dung đã nhập và lịch sử sao lưu. Bạn vẫn giữ lại tên dự án này để tải lên tệp tin mới từ đầu."}
+                            {dialogMode === 'delete' && "Toàn bộ tên dự án, danh sách ngôn ngữ và nội dung dịch bên trong sẽ bị xóa vĩnh viễn khỏi hệ thống. Không thể khôi phục lại."}
                         </DialogDescription>
                     </DialogHeader>
 
                     {(dialogMode === 'new' || dialogMode === 'rename') && (
                         <div className="py-4">
                             <Input
-                                placeholder="Tên dự án..."
+                                placeholder="Nhập tên dự án..."
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 autoFocus
@@ -160,12 +154,12 @@ export function ProjectSwitcher() {
                     )}
 
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setDialogMode(null)}>Hủy</Button>
+                        <Button variant="outline" onClick={() => setDialogMode(null)}>Hủy bỏ</Button>
                         <Button
                             variant={dialogMode === 'delete' || dialogMode === 'clear' ? "destructive" : "default"}
                             onClick={handleAction}
                         >
-                            Xác nhận
+                            Xác nhận xóa
                         </Button>
                     </DialogFooter>
                 </DialogContent>

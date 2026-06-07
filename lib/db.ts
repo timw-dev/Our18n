@@ -27,6 +27,7 @@ export interface Namespace {
     projectId: string;
     folderPath: string;
     fileName: string;
+    orderIndex?: number; // MỚI: Thứ tự xuất hiện của tệp trong phiên nhập bản dịch
 }
 
 export interface TranslationRow {
@@ -51,6 +52,7 @@ export interface TranslationRow {
         }
     >;
 
+    orderIndex?: number; // MỚI: Thứ tự dòng xuất hiện của từ khóa trong tệp gốc
     createdAt: string;
     updatedAt: string;
 }
@@ -166,13 +168,23 @@ export class I18nDatabase extends Dexie {
             versions: "id, projectId, createdAt",
         });
 
-        // BUMP VERSION 3: Bổ sung index cho bảng versions
         this.version(3).stores({
             projects: "id, name, updatedAt",
             namespaces:
                 "id, projectId, [projectId+folderPath], [projectId+folderPath+fileName], fileName",
             translationRows:
                 "id, projectId, namespaceId, [projectId+namespaceId], key, changeStatus, updatedAt",
+            versions:
+                "id, projectId, version, createdAt, [projectId+createdAt], [projectId+version]",
+        });
+
+        // BUMP VERSION 4: Bổ sung chỉ mục orderIndex hỗ trợ tối ưu tốc độ sắp xếp
+        this.version(4).stores({
+            projects: "id, name, updatedAt",
+            namespaces:
+                "id, projectId, [projectId+folderPath], [projectId+folderPath+fileName], fileName, orderIndex",
+            translationRows:
+                "id, projectId, namespaceId, [projectId+namespaceId], key, changeStatus, orderIndex, updatedAt",
             versions:
                 "id, projectId, version, createdAt, [projectId+createdAt], [projectId+version]",
         });

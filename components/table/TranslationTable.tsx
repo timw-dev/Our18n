@@ -19,32 +19,32 @@ import { VirtualizedTableBody } from "./VirtualizedTableBody";
 
 export default function TranslationTable() {
     const tableContainerRef = useRef<HTMLDivElement>(null);
-    const hiddenInputRef = useRef<HTMLTextAreaElement>(null); // Ref cho ô tàng hình hứng Focus
+    const hiddenInputRef = useRef<HTMLTextAreaElement>(null);
     const { activeProjectId } = useAppStore();
 
     const { selectedRange, editingCell, setSelectedRange, setEditingCell } = useSpreadsheetStore();
     const { performUndo, performRedo, pushToUndo } = useUndoStore();
 
-    // 1. Data Fetching từ Dexie
+    // 1. Data Fetching từ Dexie - useLiveQuery sẽ tự động render lại UI khi có bất kỳ thay đổi nào từ DB
     const project = useLiveQuery(() => activeProjectId ? db.projects.get(activeProjectId) : undefined, [activeProjectId]);
     const rawRows = useLiveQuery(() => activeProjectId ? db.translationRows.where({ projectId: activeProjectId }).toArray() : [], [activeProjectId]);
     const namespaces = useLiveQuery(() => activeProjectId ? db.namespaces.where({ projectId: activeProjectId }).toArray() : [], [activeProjectId]);
 
     const data = useMemo(() => rawRows || [], [rawRows]);
     const columns = useTranslationColumns(project, namespaces || []);
+
+    // ĐÃ SỬA: Đưa về đúng 2 tham số nguyên bản để khớp với hook
     const table = useTranslationTable(data, columns);
 
     const totalCols = useMemo(() => project?.languages.length || 0, [project]);
     const visibleLanguages = useMemo(() => project?.languages || [], [project]);
 
-    // Tích hợp Bộ lõi Copy-Paste
     const { handlePaste, handleCopy } = useTableSpreadsheetCopyPaste({
         table,
         projectId: activeProjectId || "",
         visibleLanguages,
     });
 
-    // Ép trình duyệt luôn giữ Focus thực tế vào ô tàng hình bất cứ khi nào selectedRange thay đổi
     useEffect(() => {
         const activeElem = document.activeElement;
         const isUserEditing = activeElem?.tagName === "TEXTAREA" && !activeElem.hasAttribute("readOnly");
@@ -54,7 +54,6 @@ export default function TranslationTable() {
         }
     }, [selectedRange, editingCell]);
 
-    // Đăng ký sự kiện Copy/Paste hệ thống
     useEffect(() => {
         window.addEventListener("paste", handlePaste);
         window.addEventListener("copy", handleCopy);
@@ -64,11 +63,9 @@ export default function TranslationTable() {
         };
     }, [handlePaste, handleCopy]);
 
-    // --- BỘ LẮNG NGHE KEYBOARD TẬP TRUNG TẠI COMPONENT CHA ---
     useEffect(() => {
         const handleKeyDownGlobal = async (e: KeyboardEvent) => {
             const activeElem = document.activeElement;
-            // Nếu đang trong chế độ Edit Mode nhập liệu thật sự, nhường quyền cho textarea con tự xử lý chữ nội bộ
             if (activeElem?.tagName === "TEXTAREA" && activeElem !== hiddenInputRef.current) {
                 return;
             }
@@ -76,7 +73,6 @@ export default function TranslationTable() {
             const key = e.key;
             const isCtrlOrMeta = e.ctrlKey || e.metaKey;
 
-            // Luồng 1: Xử lý REDO (Ctrl + Y hoặc Cmd + Shift + Z)
             const isRedoShortcut = (isCtrlOrMeta && key.toLowerCase() === "y") || (isCtrlOrMeta && e.shiftKey && key.toLowerCase() === "z");
             if (isRedoShortcut) {
                 e.preventDefault();
@@ -84,7 +80,6 @@ export default function TranslationTable() {
                 return;
             }
 
-            // Luồng 2: Xử lý UNDO (Ctrl + Z)
             if (isCtrlOrMeta && key.toLowerCase() === "z" && !e.shiftKey) {
                 e.preventDefault();
                 if (await performUndo()) toast.success("Undo thành công!");
@@ -100,14 +95,12 @@ export default function TranslationTable() {
 
             const currentLangCode = visibleLanguages[currentAnchor.colIdx];
 
-            // Luồng 3: Nhấn ENTER -> Bật chế độ sửa chữ
             if (key === "Enter") {
                 e.preventDefault();
                 setEditingCell(currentAnchor);
                 return;
             }
 
-            // Luồng 4: Nhấn TAB / Shift + TAB điều hướng mạng lưới
             if (key === "Tab") {
                 if (e.shiftKey) {
                     if (currentAnchor.colIdx > 0) {
@@ -125,7 +118,6 @@ export default function TranslationTable() {
                 return;
             }
 
-            // Luồng 5: Nhấn 4 phím Mũi tên di chuyển ô hình hộp Excel
             if (key === "ArrowRight") {
                 e.preventDefault();
                 const target = { rowIdx: currentAnchor.rowIdx, colIdx: Math.min(totalCols - 1, currentAnchor.colIdx + 1) };
@@ -147,7 +139,6 @@ export default function TranslationTable() {
                 setSelectedRange({ start: target, end: target });
             }
 
-            // Luồng 6: THỰC SỰ XÓA SẠCH Ô (Delete / Backspace)
             if (key === "Delete" || key === "Backspace") {
                 const dbValue = currentRowData.values[currentLangCode] || "";
                 if (!dbValue) return;
@@ -170,7 +161,6 @@ export default function TranslationTable() {
                 return;
             }
 
-            // Luồng 7: Gõ đè văn bản trực tiếp không cần nhấp đúp (Excel Style)
             if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 e.preventDefault();
                 const dbValue = currentRowData.values[currentLangCode] || "";
@@ -182,7 +172,6 @@ export default function TranslationTable() {
 
                 setEditingCell(currentAnchor);
 
-                // Nạp kí tự gõ đè sâu vào Local State của ô vừa mở Edit
                 setTimeout(() => {
                     const txtArea = document.querySelector("td textarea") as HTMLTextAreaElement;
                     if (txtArea) {
@@ -203,13 +192,11 @@ export default function TranslationTable() {
 
     return (
         <div className="w-full space-y-4">
-            {/* THẺ TEXTAREA TÀNG HÌNH ĐÓNG VAI TRÒ LÀ SHIELD ĐỂ TRÌNH DUYỆT BẮN COPY / PASTE LIÊN TỤC */}
             <textarea
                 ref={hiddenInputRef}
                 className="sr-only absolute w-0 h-0 opacity-0 pointer-events-none"
                 tabIndex={-1}
                 onPaste={(e) => {
-                    // Ép trình duyệt kích hoạt hàm handlePaste toàn cục mà chúng ta đã đăng ký
                     handlePaste(e.nativeEvent);
                 }}
             />
