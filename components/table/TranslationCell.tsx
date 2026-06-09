@@ -97,17 +97,18 @@ export const TranslationCell = memo(({ row, langCode, rowIdx, colIdx }: Translat
         <div
             onMouseDown={handleCellMouseDown}
             className={cn(
-                "relative w-full h-full flex items-stretch select-none transition-all min-w-[250px] border border-transparent outline-none",
+                "relative w-full h-full flex items-stretch select-none transition-all min-w-[250px] border border-transparent outline-none bg-inherit",
                 isSelected && "bg-blue-500/[0.06] dark:bg-blue-500/10",
                 isAnchor && "ring-2 ring-blue-600 ring-inset z-20 shadow-sm rounded-sm",
                 isSelected && !isAnchor && "ring-2 ring-blue-600/60 ring-inset z-10"
             )}
         >
-            {isChanged && <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500 z-30" />}
-            {isMissing && <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-400 z-30" />}
+            {/* FIX: Thêm pointer-events-none và hạ z-index xuống 10 */}
+            {isChanged && <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500 z-10 pointer-events-none" />}
+            {isMissing && <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-400 z-10 pointer-events-none" />}
 
             {!isEditing ? (
-                <div className="w-full p-3 font-sans text-sm text-foreground leading-relaxed whitespace-pre-wrap break-word overflow-wrap-anywhere overflow-hidden cursor-cell select-none">
+                <div className="w-full py-3 pr-3 pl-4 font-sans text-sm text-foreground leading-relaxed whitespace-pre-wrap break-word overflow-wrap-anywhere overflow-hidden cursor-cell select-none">
                     {value || <span className="text-muted-foreground/30 italic">...</span>}
                 </div>
             ) : (
@@ -118,11 +119,12 @@ export const TranslationCell = memo(({ row, langCode, rowIdx, colIdx }: Translat
                     onBlur={handleBlur}
                     placeholder="Nhập bản dịch..."
                     rows={1}
-                    className="w-full bg-background resize-none p-3 rounded-none border border-transparent transition-all outline-none cursor-text font-sans text-sm text-foreground leading-relaxed z-40 shadow-inner"
+                    className="w-full bg-background resize-none py-3 pr-3 pl-4 rounded-none border border-transparent transition-all outline-none cursor-text font-sans text-sm text-foreground leading-relaxed z-40 shadow-inner"
                     style={{ height: "auto" }}
                 />
-            )}
-        </div>
+            )
+            }
+        </div >
     );
 });
 

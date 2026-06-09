@@ -1,9 +1,10 @@
 "use client";
 
-import { flexRender, type Table as TanStackTable } from "@tanstack/react-table";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { type TranslationRow } from "@/lib/db";
+import { cn } from "@/lib/utils";
+import { flexRender, type Table as TanStackTable } from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 interface VirtualizedTableBodyProps {
     table: TanStackTable<TranslationRow>;
@@ -56,24 +57,32 @@ export function VirtualizedTableBody({ table, scrollRef }: VirtualizedTableBodyP
             {/* Chỉ render các dòng nằm trong Viewport */}
             {virtualItems.map((virtualRow) => {
                 const row = rows[virtualRow.index];
-
-                const changeBorder =
-                    row.original.changeStatus === "added" ? "border-l-4 border-emerald-500" :
-                        row.original.changeStatus === "updated" ? "border-l-4 border-amber-500" : "";
+                const changeBorder = row.original.changeStatus === "added" ? "border-l-4 border-emerald-500" : row.original.changeStatus === "updated" ? "border-l-4 border-amber-500" : "";
 
                 return (
                     <TableRow
                         key={row.id}
-                        className={changeBorder}
-                        // Quan trọng: Báo cho virtualizer biết kích thước thực tế sau khi render
+                        className={cn(changeBorder, "group")} // Thêm class group để bắt hover
                         ref={rowVirtualizer.measureElement}
                         data-index={virtualRow.index}
                     >
                         {row.getVisibleCells().map((cell) => {
+                            // FIX STICKY RIGHT BODY: Áp dụng logic tương tự Header
+                            const isActions = cell.column.id === "actions";
+                            const isStatus = cell.column.id === "status";
+                            const isSticky = isActions || isStatus;
+
                             return (
                                 <TableCell
                                     key={cell.id}
-                                    className="align-top border-r last:border-r-0 hover:bg-muted/30 transition-colors"
+                                    style={{
+                                        right: isActions ? 0 : isStatus ? 60 : undefined,
+                                        height: "1px" // MẸO CSS: Ép chiều cao thẻ con h-full bung lụa theo chiều cao của hàng chứa nó
+                                    }}
+                                    className={cn(
+                                        "align-top border-r last:border-r-0 p-0 transition-colors bg-background",
+                                        isSticky ? "sticky z-20 shadow-[-2px_0_5px_rgba(0,0,0,0.03)] group-hover:bg-muted/30" : "hover:bg-muted/30"
+                                    )}
                                 >
                                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                 </TableCell>

@@ -28,22 +28,31 @@ export const renameProject = async (projectId: string, newName: string) => {
 export async function clearProjectData(projectId: string): Promise<void> {
     await db.transaction(
         "rw",
-        [db.translationRows, db.namespaces, db.versions],
+        [db.projects, db.translationRows, db.namespaces, db.versions],
         async () => {
-            // 1. Xóa sạch hàng dịch
+            // 1. Đọc thông tin dự án hiện tại để lấy lại ngôn ngữ gốc cấu hình ban đầu
+            const project = await db.projects.get(projectId);
+            const defaultLang = project?.defaultLanguage || "en";
+
+            // 2. FIX DỨT ĐIỂM BUG 2: Reset mảng languages cấu hình về trạng thái nguyên bản
+            await db.projects.update(projectId, {
+                languages: [defaultLang],
+                updatedAt: new Date().toISOString(),
+            });
+
+            // 3. Xóa sạch hàng dịch
             await db.translationRows.where({ projectId }).delete();
 
-            // 2. Xóa sạch cấu trúc tệp tin của dự án này (Để lần sau import tính lại từ đầu)
+            // 4. Xóa sạch cấu trúc tệp tin của dự án này
             await db.namespaces.where({ projectId }).delete();
 
-            // 3. Xóa sạch lịch sử snapshot
+            // 5. Xóa sạch lịch sử snapshot
             await db.versions.where({ projectId }).delete();
         },
     );
 }
 
 export const deleteProject = async (projectId: string) => {
-    // Xóa sạch bách (Cascade Delete)
     await db.transaction(
         "rw",
         db.projects,

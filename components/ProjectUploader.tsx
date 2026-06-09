@@ -1,12 +1,11 @@
 "use client";
 
 import { analyzeImportedFiles, commitImportData, type ImportPreviewResult, type PendingCommitData, type PreviewRow } from "@/lib/import-utils";
-import { AlertTriangle, CheckCircle2, ChevronRight, FolderUp, GitMerge, HelpCircle, Sparkles, Trash2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, FolderUp, HelpCircle, X } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { toast } from "sonner";
 
-import { useAppStore } from "@/app/store/useAppStore";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -18,23 +17,25 @@ interface ProjectUploaderProps {
     onUploadComplete: () => void;
 }
 
-interface ActiveSections {
-    added: PreviewRow[];
-    updated: PreviewRow[];
-    conflicted: PreviewRow[];
-    deleted: PreviewRow[];
-}
-
 export default function ProjectUploader({ projectId, onUploadComplete }: ProjectUploaderProps) {
     const [langCode, setLangCode] = useState<string>("en");
     const [previewResult, setPreviewResult] = useState<ImportPreviewResult | null>(null);
     const [isCommitting, setIsCommitting] = useState<boolean>(false);
     const [activeNamespace, setActiveNamespace] = useState<string | null>(null);
+    const [currentFilterTab, setCurrentFilterTab] = useState<"all" | "added" | "updated" | "conflicted">("all");
+    const [conflictResolutions, setConflictResolutions] = useState<Record<string, "local" | "incoming">>({});
 
     const detectedLanguagesList = useMemo<string[]>(() => {
         if (!previewResult?.pendingData?.detectedLanguages) return [];
         return Array.from(previewResult.pendingData.detectedLanguages as Set<string>).sort();
     }, [previewResult]);
+
+    const handleResolveConflict = useCallback((rowId: string, lang: string, choice: "local" | "incoming") => {
+        setConflictResolutions(prev => ({
+            ...prev,
+            [`${rowId}_${lang}`]: choice
+        }));
+    }, []);
 
     const groupedChanges = useMemo<Record<string, PreviewRow[]>>(() => {
         const rows: PreviewRow[] = previewResult?.pendingData?.previewRows || [];
@@ -85,11 +86,26 @@ export default function ProjectUploader({ projectId, onUploadComplete }: Project
     }, []);
 
     const onDrop = useCallback(async (acceptedFiles: File[]) => {
+        // FIX BUG 1: Chặn đứng luồng xử lý từ vòng gửi xe nếu không tìm thấy projectId hợp lệ
+        if (!projectId) {
+            toast.error("Vui lòng chọn hoặc khởi tạo một Không gian làm việc (Project) trước khi nạp tệp bản dịch!");
+            return;
+        }
+
         if (acceptedFiles.length === 0) return;
         const toastId = toast.loading("Đang phân tích dữ liệu tệp tin...");
         try {
             const result = await analyzeImportedFiles(projectId, langCode, acceptedFiles);
             toast.dismiss(toastId);
+
+            // Bổ sung hiển thị danh sách cảnh báo nếu bộ lọc phát hiện file tiếng lạ
+            if (result.warnings.length > 0) {
+                result.warnings.forEach(warn => console.warn("Import Warning:", warn));
+                if (result.importedCount === 0) {
+                    toast.error("Toàn bộ tệp bản dịch bị từ chối do không khớp ngôn ngữ của Project hiện hành.");
+                    return;
+                }
+            }
 
             const pending = result.pendingData;
             const hasData = (pending?.previewRows?.length ?? 0) > 0;
@@ -110,25 +126,17 @@ export default function ProjectUploader({ projectId, onUploadComplete }: Project
             ).sort();
 
             setActiveNamespace(sortedKeys[0] || "common.json");
+            setCurrentFilterTab("all");
         } catch (error) {
             console.error(error);
             toast.error("Không thể đọc tệp văn bản.");
         }
     }, [projectId, langCode]);
 
-    const activeSections = useMemo<ActiveSections>(() => {
-        const fileRows = (activeNamespace ? groupedChanges[activeNamespace] : []) || [];
-        return {
-            added: fileRows.filter(r => r.status === "added"),
-            updated: fileRows.filter(r => r.status === "updated"),
-            conflicted: fileRows.filter(r => r.status === "conflicted"),
-            deleted: fileRows.filter(r => r.status === "deleted")
-        };
-    }, [activeNamespace, groupedChanges]);
-
     const handleCancel = () => {
         setPreviewResult(null);
         setActiveNamespace(null);
+        setConflictResolutions({});
     };
 
     const handleConfirmImport = async () => {
@@ -139,25 +147,21 @@ export default function ProjectUploader({ projectId, onUploadComplete }: Project
             const builtResolutions: Record<string, 'local' | 'incoming'> = {};
 
             pending.previewRows.forEach(row => {
-                if (row.status === "updated" || row.status === "conflicted") {
-                    Object.keys(row.values).forEach(lang => {
-                        builtResolutions[`${row.id}_${lang}`] = 'incoming';
-                    });
-                }
+                Object.keys(row.values).forEach(lang => {
+                    const key = `${row.id}_${lang}`;
+                    if (row.status === "conflicted") {
+                        builtResolutions[key] = conflictResolutions[key] || 'incoming';
+                    } else if (row.status === "updated") {
+                        builtResolutions[key] = 'incoming';
+                    }
+                });
             });
 
-            // 1. Ghi dữ liệu import xuống IndexedDB thông qua Core Engine
             await commitImportData(pending, builtResolutions);
-
-            // 2. CHUẨN KIẾN TRÚC: useLiveQuery tự động đồng bộ data real-time, không cần ép hàm RAM thủ công
-            try {
-                useAppStore.getState().setActiveVersion(null);
-            } catch (e) {
-                // An toàn nếu app không dùng bộ lọc phiên bản
-            }
 
             toast.success("Cập nhật bản dịch vào không gian làm việc thành công!");
             setPreviewResult(null);
+            setConflictResolutions({});
             onUploadComplete();
         } catch (error) {
             console.error("Lỗi trong quá trình thực thi commit import:", error);
@@ -168,6 +172,11 @@ export default function ProjectUploader({ projectId, onUploadComplete }: Project
     };
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
+    const filteredPreviewRows = useMemo(() => {
+        const fileRows = (activeNamespace ? groupedChanges[activeNamespace] : []) || [];
+        if (currentFilterTab === "all") return fileRows;
+        return fileRows.filter(r => r.status === currentFilterTab);
+    }, [activeNamespace, groupedChanges, currentFilterTab]);
 
     return (
         <div className="w-full max-w-5xl mx-auto space-y-6 mt-4">
@@ -202,129 +211,153 @@ export default function ProjectUploader({ projectId, onUploadComplete }: Project
                     </DialogHeader>
 
                     <div className="flex flex-1 overflow-hidden">
-                        {/* SIDEBAR FILE */}
-                        <div className="w-80 border-r bg-muted/20 flex flex-col shrink-0">
-                            <div className="p-3 text-[11px] font-bold uppercase text-muted-foreground tracking-wider border-b shrink-0 select-none">
+                        {/* SIDEBAR FILE - FIX BUG 4: border-r nằm ở container cha, ScrollArea nằm lọt lòng */}
+                        <div className="w-80 border-r border-muted bg-muted/20 flex flex-col shrink-0 overflow-hidden">
+                            {/* FIX BUG 4: h-[49px] py-[13px] để đồng nhất hoàn hảo với thanh tab bar bên cạnh */}
+                            <div className="h-[49px] px-4 py-[15px] text-[11px] font-bold uppercase text-muted-foreground tracking-wider border-b bg-muted/10 shrink-0 select-none flex items-center">
                                 Danh sách tệp bản dịch
                             </div>
                             <ScrollArea className="flex-1 h-full">
-                                {namespaceList.map(ns => {
-                                    const changesInNs = groupedChanges[ns] || [];
+                                <div className="pb-10">
+                                    {namespaceList.map(ns => {
+                                        const changesInNs = groupedChanges[ns] || [];
+                                        const addedCount = changesInNs.filter(r => r.status === "added").length;
+                                        const updatedCount = changesInNs.filter(r => r.status === "updated").length;
+                                        const conflictedCount = changesInNs.filter(r => r.status === "conflicted").length;
+                                        const deletedCount = changesInNs.filter(r => r.status === "deleted").length;
 
-                                    // Tính toán nhanh số lượng biến động theo từng loại trạng thái trong file này
-                                    const addedCount = changesInNs.filter(r => r.status === "added").length;
-                                    const updatedCount = changesInNs.filter(r => r.status === "updated").length;
-                                    const conflictedCount = changesInNs.filter(r => r.status === "conflicted").length;
-                                    const deletedCount = changesInNs.filter(r => r.status === "deleted").length;
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={ns}
+                                                onClick={() => setActiveNamespace(ns)}
+                                                className={cn(
+                                                    "w-full text-left px-4 py-3 text-sm flex items-center justify-between border-b transition-colors hover:bg-muted/50 group/btn",
+                                                    activeNamespace === ns ? "bg-background border-r-2 border-r-primary" : ""
+                                                )}
+                                            >
+                                                <div className="flex flex-col truncate mr-2 w-full">
+                                                    <span className="truncate font-semibold text-foreground/90 group-hover/btn:text-primary transition-colors">
+                                                        {ns}
+                                                    </span>
 
-                                    return (
-                                        <button
-                                            key={ns}
-                                            onClick={() => setActiveNamespace(ns)}
-                                            className={cn(
-                                                "w-full text-left px-4 py-3 text-sm flex items-center justify-between border-b transition-colors hover:bg-muted/50 group/btn",
-                                                activeNamespace === ns ? "bg-background border-r-2 border-r-primary" : ""
-                                            )}
-                                        >
-                                            <div className="flex flex-col truncate mr-2 w-full">
-                                                {/* Tên File Json/Js */}
-                                                <span className="truncate font-semibold text-foreground/90 group-hover/btn:text-primary transition-colors">
-                                                    {ns}
-                                                </span>
-
-                                                {/* Chỉ số phụ hiển thị biến động nhỏ (+10, ~2) */}
-                                                <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] font-medium text-muted-foreground">
-                                                    {addedCount > 0 && (
-                                                        <span className="text-green-600 dark:text-green-500 font-bold">
-                                                            +{addedCount} new
-                                                        </span>
-                                                    )}
-                                                    {updatedCount > 0 && (
-                                                        <span className="text-blue-600 dark:text-blue-500 font-bold">
-                                                            ~{updatedCount} upd
-                                                        </span>
-                                                    )}
-                                                    {conflictedCount > 0 && (
-                                                        <span className="text-amber-600 dark:text-amber-500 font-bold bg-amber-500/10 px-1 rounded">
-                                                            ⚠️ {conflictedCount} conf
-                                                        </span>
-                                                    )}
-                                                    {deletedCount > 0 && (
-                                                        <span className="text-red-600 dark:text-red-500 font-bold line-through decoration-red-500/50">
-                                                            -{deletedCount} del
-                                                        </span>
-                                                    )}
-                                                    {addedCount === 0 && updatedCount === 0 && conflictedCount === 0 && deletedCount === 0 && (
-                                                        <span className="text-muted-foreground/40 italic">Không thay đổi</span>
-                                                    )}
+                                                    <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] font-medium text-muted-foreground">
+                                                        {addedCount > 0 && <span className="text-green-600 dark:text-green-500 font-bold">+{addedCount} new</span>}
+                                                        {updatedCount > 0 && <span className="text-blue-600 dark:text-blue-500 font-bold">~{updatedCount} upd</span>}
+                                                        {conflictedCount > 0 && <span className="text-amber-600 dark:text-amber-500 font-bold bg-amber-500/10 px-1 rounded">⚠️ {conflictedCount} conf</span>}
+                                                        {deletedCount > 0 && <span className="text-red-600 dark:text-red-500 font-bold line-through">-{deletedCount} del</span>}
+                                                        {addedCount === 0 && updatedCount === 0 && conflictedCount === 0 && deletedCount === 0 && <span className="text-muted-foreground/40 italic">Không thay đổi</span>}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <ChevronRight className={cn(
-                                                "w-4 h-4 opacity-20 shrink-0 group-hover/btn:opacity-60 group-hover/btn:translate-x-0.5 transition-all",
-                                                activeNamespace === ns ? "opacity-60 text-primary" : ""
-                                            )} />
-                                        </button>
-                                    );
-                                })}
+                                                <ChevronRight className={cn("w-4 h-4 opacity-20 shrink-0 group-hover/btn:opacity-60 group-hover/btn:translate-x-0.5 transition-all", activeNamespace === ns ? "opacity-60 text-primary" : "")} />
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </ScrollArea>
                         </div>
 
                         {/* KHUNG BẢNG SPREADSHEET CHÍNH TÍCH HỢP INLINE EDIT */}
                         <div className="flex-1 flex flex-col bg-background min-h-0 overflow-hidden">
                             {activeNamespace ? (
-                                <ScrollArea className="flex-1 h-full">
-                                    <div className="p-4 space-y-8 pb-20">
-                                        <div className="p-2.5 bg-muted/30 border rounded-lg text-sm font-bold flex items-center gap-2 text-foreground/80 shrink-0">
-                                            <GitMerge className="w-4 h-4 text-primary" />
-                                            Tệp đang xem: {activeNamespace}
+                                <div className="flex flex-col h-full overflow-hidden">
+                                    {/* THANH ĐIỀU HƯỚNG TABS BỘ LỌC TẬP TRUNG */}
+                                    <div className="h-[49px] px-4 py-2 border-b bg-muted/10 flex items-center justify-between shrink-0 select-none">
+                                        <div className="flex items-center gap-1 bg-muted p-0.5 rounded-lg border text-xs">
+                                            <button
+                                                type="button"
+                                                onClick={() => setCurrentFilterTab("all")}
+                                                className={cn("px-3 py-1 rounded-md font-medium transition-all", currentFilterTab === "all" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                                            >
+                                                Tất cả ({groupedChanges[activeNamespace]?.length || 0})
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setCurrentFilterTab("added")}
+                                                className={cn("px-3 py-1 rounded-md font-medium transition-all", currentFilterTab === "added" ? "bg-background text-green-600 shadow-sm font-bold" : "text-muted-foreground hover:text-foreground")}
+                                            >
+                                                Mới ({groupedChanges[activeNamespace]?.filter(r => r.status === "added").length || 0})
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setCurrentFilterTab("updated")}
+                                                className={cn("px-3 py-1 rounded-md font-medium transition-all", currentFilterTab === "updated" ? "bg-background text-blue-600 shadow-sm font-bold" : "text-muted-foreground hover:text-foreground")}
+                                            >
+                                                Cập nhật ({groupedChanges[activeNamespace]?.filter(r => r.status === "updated").length || 0})
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setCurrentFilterTab("conflicted")}
+                                                className={cn("px-3 py-1 rounded-md font-medium transition-all", currentFilterTab === "conflicted" ? "bg-background text-amber-600 shadow-sm font-bold" : "text-muted-foreground hover:text-foreground")}
+                                            >
+                                                Xung đột ({groupedChanges[activeNamespace]?.filter(r => r.status === "conflicted").length || 0})
+                                            </button>
                                         </div>
 
-                                        {/* PHÂN KHU 1: ADDED SECTIONS */}
-                                        {activeSections.added.length > 0 && (
-                                            <div className="space-y-3">
-                                                <div className="flex items-center gap-2 text-green-700 font-bold text-xs uppercase tracking-wider">
-                                                    <Sparkles className="w-4 h-4 text-green-600" />
-                                                    Từ khóa mới thêm tinh ({activeSections.added.length})
-                                                </div>
-                                                <ImportPreviewTable rows={activeSections.added} languages={detectedLanguagesList} onCellValueChange={handleCellValueChange} />
+                                        {/* BỘ NÚT XỬ LÝ NHANH CHO CÁC Ô XUNG ĐỘT TRONG FILE */}
+                                        {groupedChanges[activeNamespace]?.some(r => r.status === "conflicted") && (
+                                            <div className="flex items-center gap-1.5">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="h-7 py-0 px-2.5 text-[11px] border-amber-500/40 text-amber-700 hover:bg-amber-500/10"
+                                                    onClick={() => {
+                                                        const newRes = { ...conflictResolutions };
+                                                        (groupedChanges[activeNamespace] || []).filter(r => r.status === "conflicted").forEach(row => {
+                                                            detectedLanguagesList.forEach(lang => {
+                                                                if ((row.localValues?.[lang] || "") !== (row.values[lang] || "")) {
+                                                                    newRes[`${row.id}_${lang}`] = "local";
+                                                                }
+                                                            });
+                                                        });
+                                                        setConflictResolutions(newRes);
+                                                        toast.success("Đã chọn: Giữ lại toàn bộ bản cũ trên máy");
+                                                    }}
+                                                >
+                                                    🛡️ Giữ tất cả Local
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    className="h-7 py-0 px-2.5 text-[11px] bg-green-600 hover:bg-green-700 text-white"
+                                                    onClick={() => {
+                                                        const newRes = { ...conflictResolutions };
+                                                        (groupedChanges[activeNamespace] || []).filter(r => r.status === "conflicted").forEach(row => {
+                                                            detectedLanguagesList.forEach(lang => {
+                                                                if ((row.localValues?.[lang] || "") !== (row.values[lang] || "")) {
+                                                                    newRes[`${row.id}_${lang}`] = "incoming";
+                                                                }
+                                                            });
+                                                        });
+                                                        setConflictResolutions(newRes);
+                                                        toast.success("Đã chọn: Ghi đè toàn bộ bằng bản mới");
+                                                    }}
+                                                >
+                                                    📥 Lấy tất cả Incoming
+                                                </Button>
                                             </div>
                                         )}
-
-                                        {/* PHÂN KHU 2: UPDATED SECTIONS */}
-                                        {activeSections.updated.length > 0 && (
-                                            <div className="space-y-3">
-                                                <div className="flex items-center gap-2 text-blue-700 font-bold text-xs uppercase tracking-wider">
-                                                    <GitMerge className="w-4 h-4 text-blue-600" />
-                                                    Từ khóa có sự cập nhật an toàn ({activeSections.updated.length})
-                                                </div>
-                                                <ImportPreviewTable rows={activeSections.updated} languages={detectedLanguagesList} onCellValueChange={handleCellValueChange} />
-                                            </div>
-                                        )}
-
-                                        {/* PHÂN KHU 3: CONFLICTED SECTIONS */}
-                                        {activeSections.conflicted.length > 0 && (
-                                            <div className="space-y-3">
-                                                <div className="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase tracking-wider">
-                                                    <AlertTriangle className="w-4 h-4 text-amber-600" />
-                                                    Từ khóa có sự xung đột văn bản ({activeSections.conflicted.length})
-                                                </div>
-                                                <ImportPreviewTable rows={activeSections.conflicted} languages={detectedLanguagesList} onCellValueChange={handleCellValueChange} />
-                                            </div>
-                                        )}
-
-                                        {/* PHÂN KHU 4: DELETED SECTIONS */}
-                                        {activeSections.deleted.length > 0 && (
-                                            <div className="space-y-3">
-                                                <div className="flex items-center gap-2 text-red-700 font-bold text-xs uppercase tracking-wider">
-                                                    <Trash2 className="w-4 h-4 text-red-600" />
-                                                    Từ khóa bị lược xóa khỏi tệp ({activeSections.deleted.length})
-                                                </div>
-                                                <ImportPreviewTable rows={activeSections.deleted} languages={detectedLanguagesList} onCellValueChange={() => { }} />
-                                            </div>
-                                        )}
-
                                     </div>
-                                </ScrollArea>
+
+                                    {/* BẢNG SPREADSHEET ĐƠN DUY NHẤT ĐƯỢC TỐI ƯU HÓA */}
+                                    <ScrollArea className="flex-1 h-full p-4">
+                                        {filteredPreviewRows.length > 0 ? (
+                                            <div className="pb-24">
+                                                <ImportPreviewTable
+                                                    rows={filteredPreviewRows}
+                                                    languages={detectedLanguagesList}
+                                                    onCellValueChange={handleCellValueChange}
+                                                    onResolveConflict={handleResolveConflict}
+                                                    resolutions={conflictResolutions}
+                                                />
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col items-center justify-center text-muted-foreground p-16 text-center select-none">
+                                                <HelpCircle className="w-10 h-10 mb-3 opacity-20" />
+                                                <p className="text-xs">Không tìm thấy từ khóa nào thuộc bộ lọc này.</p>
+                                            </div>
+                                        )}
+                                    </ScrollArea>
+                                </div>
                             ) : (
                                 <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-12 text-center">
                                     <HelpCircle className="w-12 h-12 mb-4 opacity-10" />

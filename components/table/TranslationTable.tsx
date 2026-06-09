@@ -16,6 +16,7 @@ import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useTableSpreadsheetCopyPaste } from "@/hooks/useTableSpreadsheetCopyPaste";
 import { TranslationToolbar } from "./TranslationToolbar";
 import { VirtualizedTableBody } from "./VirtualizedTableBody";
+import { cn } from "@/lib/utils";
 
 export default function TranslationTable() {
     const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -25,7 +26,6 @@ export default function TranslationTable() {
     const { selectedRange, editingCell, setSelectedRange, setEditingCell } = useSpreadsheetStore();
     const { performUndo, performRedo, pushToUndo } = useUndoStore();
 
-    // 1. Data Fetching từ Dexie - useLiveQuery sẽ tự động render lại UI khi có bất kỳ thay đổi nào từ DB
     const project = useLiveQuery(() => activeProjectId ? db.projects.get(activeProjectId) : undefined, [activeProjectId]);
     const rawRows = useLiveQuery(() => activeProjectId ? db.translationRows.where({ projectId: activeProjectId }).toArray() : [], [activeProjectId]);
     const namespaces = useLiveQuery(() => activeProjectId ? db.namespaces.where({ projectId: activeProjectId }).toArray() : [], [activeProjectId]);
@@ -33,11 +33,44 @@ export default function TranslationTable() {
     const data = useMemo(() => rawRows || [], [rawRows]);
     const columns = useTranslationColumns(project, namespaces || []);
 
-    // ĐÃ SỬA: Đưa về đúng 2 tham số nguyên bản để khớp với hook
     const table = useTranslationTable(data, columns);
 
     const totalCols = useMemo(() => project?.languages.length || 0, [project]);
     const visibleLanguages = useMemo(() => project?.languages || [], [project]);
+
+    // =========================================================
+    // FIX F5: DÙNG REF ĐỂ KHÓA TRẠNG THÁI KHỞI TẠO
+    // =========================================================
+    const isVisibilityRestored = useRef(false);
+
+    // 1. Đọc từ LocalStorage LÊN Bảng (Chỉ chạy 1 lần khi load Project)
+    useEffect(() => {
+        if (activeProjectId && project && !isVisibilityRestored.current) {
+            const savedVis = localStorage.getItem(`our18n_vis_${activeProjectId}`);
+            if (savedVis) {
+                try {
+                    table.setColumnVisibility(JSON.parse(savedVis));
+                } catch (e) {
+                    console.error("Lỗi parse visibility state");
+                }
+            }
+            isVisibilityRestored.current = true; // Chốt khóa
+        }
+    }, [activeProjectId, project, table]);
+
+    // 2. Ghi từ Bảng XUỐNG LocalStorage (Chỉ ghi khi đã khôi phục xong)
+    useEffect(() => {
+        if (isVisibilityRestored.current && activeProjectId) {
+            const currentVis = table.getState().columnVisibility;
+            localStorage.setItem(`our18n_vis_${activeProjectId}`, JSON.stringify(currentVis));
+        }
+    }, [table.getState().columnVisibility, activeProjectId]);
+
+    // Khi đổi Project, mở khóa để reset quy trình đọc
+    useEffect(() => {
+        isVisibilityRestored.current = false;
+    }, [activeProjectId]);
+    // =========================================================
 
     const { handlePaste, handleCopy } = useTableSpreadsheetCopyPaste({
         table,
@@ -66,9 +99,7 @@ export default function TranslationTable() {
     useEffect(() => {
         const handleKeyDownGlobal = async (e: KeyboardEvent) => {
             const activeElem = document.activeElement;
-            if (activeElem?.tagName === "TEXTAREA" && activeElem !== hiddenInputRef.current) {
-                return;
-            }
+            if (activeElem?.tagName === "TEXTAREA" && activeElem !== hiddenInputRef.current) return;
 
             const key = e.key;
             const isCtrlOrMeta = e.ctrlKey || e.metaKey;
@@ -191,7 +222,7 @@ export default function TranslationTable() {
     }
 
     return (
-        <div className="w-full space-y-4">
+        <div className="w-full h-full flex flex-col min-h-0 space-y-4">
             <textarea
                 ref={hiddenInputRef}
                 className="sr-only absolute w-0 h-0 opacity-0 pointer-events-none"
@@ -201,23 +232,43 @@ export default function TranslationTable() {
                 }}
             />
 
-            <div className="sticky top-0 z-20 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60 pb-2 pt-2">
+            <div className="shrink-0 z-40 bg-background pb-1">
                 <TranslationToolbar table={table} totalRows={data.length} />
             </div>
 
             <div
                 ref={tableContainerRef}
-                className="border rounded-md shadow-sm bg-background w-full overflow-auto max-h-[calc(100vh-280px)] outline-none"
+                className="flex-1 relative border rounded-md shadow-sm bg-background w-full overflow-auto outline-none [&>div]:overflow-visible"
             >
-                <Table>
-                    <TableHeader className="sticky top-0 bg-background z-10 shadow-sm border-b">
+                {/* FIX KHOẢNG TRẮNG: Sử dụng w-full để bảng linh hoạt lấp đầy */}
+                <Table className="w-full border-collapse">
+                    <TableHeader className="sticky top-0 bg-background z-30 shadow-sm border-b ring-1 ring-border">
                         {table.getHeaderGroups().map((headerGroup) => (
-                            <TableRow key={headerGroup.id} className="bg-muted/50">
-                                {headerGroup.headers.map((header) => (
-                                    <TableHead key={header.id} className="border-r last:border-r-0 font-bold uppercase text-xs">
-                                        {!header.isPlaceholder && flexRender(header.column.columnDef.header, header.getContext())}
-                                    </TableHead>
-                                ))}
+                            <TableRow key={headerGroup.id} className="bg-muted hover:bg-muted">
+                                {headerGroup.headers.map((header) => {
+                                    const isActions = header.id === "actions";
+                                    const isStatus = header.id === "status";
+                                    const isSticky = isActions || isStatus;
+                                    const isLangCol = header.id.startsWith("lang_");
+
+                                    return (
+                                        <TableHead
+                                            key={header.id}
+                                            style={{
+                                                // FIX AUTO WIDTH: Ép 'auto' cho cột NN để nó giãn ra hết mức có thể
+                                                width: isLangCol ? "auto" : header.getSize(),
+                                                minWidth: isLangCol ? "250px" : undefined,
+                                                right: isActions ? 0 : isStatus ? 60 : undefined
+                                            }}
+                                            className={cn(
+                                                "border-r last:border-r-0 font-extrabold uppercase text-[11px] text-foreground/80 tracking-wider h-10 px-2 align-middle bg-muted",
+                                                isSticky && "sticky z-50 shadow-[-2px_0_5px_rgba(0,0,0,0.03)]"
+                                            )}
+                                        >
+                                            {!header.isPlaceholder && flexRender(header.column.columnDef.header, header.getContext())}
+                                        </TableHead>
+                                    );
+                                })}
                             </TableRow>
                         ))}
                     </TableHeader>

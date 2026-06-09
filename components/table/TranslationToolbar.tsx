@@ -2,7 +2,7 @@
 import { SaveSnapshotDialog } from "./SaveSnapshotDialog";
 import { useState, useMemo } from "react";
 import { type Table as TanStackTable } from "@tanstack/react-table";
-import { Download, Loader2, History } from "lucide-react";
+import { Download, Loader2, Trash2, Columns3 } from "lucide-react";
 import { toast } from "sonner";
 import { useLiveQuery } from "dexie-react-hooks";
 
@@ -12,8 +12,16 @@ import { useAppStore } from "@/app/store/useAppStore";
 
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button"; // Đã import buttonVariants
 import { VersionHistoryPanel } from "@/components/VersionHistoryPanel";
+import { cn } from "@/lib/utils"; // Đã import cn
+
+import {
+    DropdownMenu,
+    DropdownMenuCheckboxItem,
+    DropdownMenuContent,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface TranslationToolbarProps {
     table: TanStackTable<TranslationRow>;
@@ -28,26 +36,19 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
     const filteredRows = table.getFilteredRowModel().rows.length;
     const isTableEmpty = totalRows === 0;
 
-    // 1. QUERY KIỂM TRA XEM CÓ TRÙNG KHỚP PHIÊN BẢN NÀO ĐANG ĐƯỢC XEM KHÔNG
-    // Trong kiến trúc lưu trữ của bạn, nếu working copy hiện tại trùng khớp hoàn toàn với một version,
-    // hoặc bạn có state activeVersionId trong Store, bạn có thể gọi trực tiếp.
-    // Dưới đây là giải pháp tối ưu: Tìm kiếm metadata dựa trên trạng thái làm việc (hoặc sync từ Store của bạn nếu có)
+    const selectedRows = table.getSelectedRowModel().rows;
+    const isRowSelected = selectedRows.length > 0;
+
     const allVersions = useLiveQuery(
         () => activeProjectId ? db.versions.where({ projectId: activeProjectId }).toArray() : [],
         [activeProjectId]
     );
 
-    // Giả định bạn lưu activeVersionId trong Store, hoặc nếu không, bạn có thể đọc trạng thái checkout.
-    // Ở đây mình tạo cấu trúc lấy thông tin dựa trên store hoặc tìm kiếm version matching.
-    const { activeVersionId } = useAppStore(); // Đảm bảo bổ sung trường này vào useAppStore nếu bạn có làm tính năng checkout
+    const { activeVersionId } = useAppStore();
 
     const currentVersionName = useMemo(() => {
         if (!allVersions || allVersions.length === 0) return undefined;
-        if (activeVersionId) {
-            return allVersions.find(v => v.id === activeVersionId)?.name;
-        }
-        // Trường hợp không có activeId cố định, nếu không có thay đổi (hasChanges = false), 
-        // bạn có thể lấy tên của version mới nhất làm context (tùy chọn)
+        if (activeVersionId) return allVersions.find(v => v.id === activeVersionId)?.name;
         return undefined;
     }, [allVersions, activeVersionId]);
 
@@ -69,20 +70,14 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
         }
     };
 
-    // 2. TRUYỀN THÊM VERSION NAME VÀO PIPELINE EXPORT
     const handleExport = async () => {
         if (!activeProjectId || isTableEmpty) return;
-
         setIsExporting(true);
         const toastId = toast.loading("Đang nén file Export...");
-
         try {
             const project = await db.projects.get(activeProjectId);
             if (!project) throw new Error("Project không tồn tại");
-
-            // Truyền thêm tên phiên bản hiện hành vào hàm tiện ích
             await exportProjectAsZip(activeProjectId, project.name, currentVersionName);
-
             toast.success("Export thành công!", { id: toastId });
         } catch (error) {
             console.error(error);
@@ -92,19 +87,50 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
         }
     };
 
+    const handleBulkDelete = async () => {
+        if (!activeProjectId) return;
+        const confirm = window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn ${selectedRows.length} dòng bản dịch này khỏi dự án?`);
+        if (!confirm) return;
+
+        try {
+            const idsToDelete = selectedRows.map(r => r.original.id);
+            await db.translationRows.bulkDelete(idsToDelete);
+            table.resetRowSelection();
+            toast.success(`Đã xóa thành công ${selectedRows.length} dòng.`);
+        } catch (error) {
+            toast.error("Lỗi khi xóa hàng loạt.");
+        }
+    };
+
     const hasChanges = table.getPreFilteredRowModel().rows.some(
         row => row.original.changeStatus !== 'unchanged'
     );
 
+    const languageColumns = table.getAllLeafColumns().filter(column => column.id.startsWith("lang_"));
+
     return (
         <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-muted/30 border rounded-md">
             <div className="flex items-center gap-4">
-                <Input
-                    placeholder="Tìm kiếm key, nội dung..."
-                    value={table.getState().globalFilter ?? ""}
-                    onChange={(e) => table.setGlobalFilter(e.target.value)}
-                    className="w-64 bg-background"
-                />
+                {isRowSelected ? (
+                    <div className="flex items-center gap-3 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-md">
+                        <span className="text-sm font-semibold text-red-700 dark:text-red-400">
+                            Đã chọn {selectedRows.length} dòng
+                        </span>
+                        <Button variant="destructive" size="sm" className="h-7 text-xs px-2" onClick={handleBulkDelete}>
+                            <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Xóa hàng loạt
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 text-xs px-2" onClick={() => table.resetRowSelection()}>
+                            Hủy bỏ
+                        </Button>
+                    </div>
+                ) : (
+                    <Input
+                        placeholder="Tìm kiếm key, nội dung..."
+                        value={table.getState().globalFilter ?? ""}
+                        onChange={(e) => table.setGlobalFilter(e.target.value)}
+                        className="w-64 bg-background"
+                    />
+                )}
 
                 <div className="flex items-center gap-2 pl-4 border-l">
                     <Input
@@ -136,9 +162,37 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
                 </div>
 
                 <div className="flex items-center gap-2 pl-4 border-l">
+
+                    {/* KHÔNG CÒN asChild - SỬ DỤNG buttonVariants CHUẨN */}
+                    <DropdownMenu>
+                        <DropdownMenuTrigger
+                            className={cn(
+                                buttonVariants({ variant: "outline" }),
+                                "gap-2 shadow-sm bg-background cursor-pointer outline-none"
+                            )}
+                        >
+                            <Columns3 className="w-4 h-4 text-muted-foreground" />
+                            Hiển thị
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                            {languageColumns.map((column) => {
+                                const langName = column.id.replace("lang_", "").toUpperCase();
+                                return (
+                                    <DropdownMenuCheckboxItem
+                                        key={column.id}
+                                        className="capitalize cursor-pointer"
+                                        checked={column.getIsVisible()}
+                                        onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                                    >
+                                        Bản dịch ({langName})
+                                    </DropdownMenuCheckboxItem>
+                                );
+                            })}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+
                     {activeProjectId && (
                         <>
-                            {/* TRUYỀN TÊN PHIÊN BẢN HIỆN TẠI VÀO ĐÂY */}
                             <VersionHistoryPanel
                                 projectId={activeProjectId}
                                 currentVersionName={currentVersionName}
