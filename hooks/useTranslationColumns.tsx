@@ -49,7 +49,10 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
             const projectId = useAppStore.getState().activeProjectId;
             if (!projectId) return;
 
-            const confirm = window.confirm(`CẢNH BÁO: Xóa vĩnh viễn ngôn ngữ ${langToRemove.toUpperCase()}?`);
+            // SỬA MỤC 6: Bản copy confirm modal rõ ràng, chi tiết cấu trúc loại bỏ
+            const confirm = window.confirm(
+                `XÓA NGÔN NGỮ "${langToRemove.toUpperCase()}"?\n\nHành động này sẽ xóa sạch TOÀN BỘ dữ liệu bản dịch của cột này khỏi dự án hiện tại.\nHành động này không thể hoàn tác trừ khi bạn khôi phục lại một Snapshot cũ.\n\nBạn có chắc chắn muốn xóa không?`
+            );
             if (!confirm) return;
 
             try {
@@ -59,7 +62,7 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                         languages: proj.languages.filter(l => l !== langToRemove),
                         updatedAt: new Date().toISOString()
                     });
-                    toast.success(`Đã xóa ngôn ngữ ${langToRemove.toUpperCase()}`);
+                    toast.success(`Đã xóa ngôn ngữ ${langToRemove.toUpperCase()} thành công`);
                 }
             } catch (error) {
                 toast.error("Gặp lỗi khi xóa ngôn ngữ.");
@@ -95,7 +98,9 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                 header: () => <div className="text-center font-bold text-muted-foreground">No.</div>,
                 size: 50,
                 cell: ({ row }) => (
-                    <div className="text-center font-mono text-[11px] text-muted-foreground w-full">{row.index + 1}</div>
+                    <div className="flex justify-center items-center w-full h-full px-1">
+                        <span className="font-mono text-[11px] text-muted-foreground">{row.index + 1}</span>
+                    </div>
                 ),
             },
             {
@@ -117,28 +122,30 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                     );
                 },
             },
-            // FIX: Gộp tất cả các cột ngôn ngữ thành một vòng lặp duy nhất, bình đẳng quyền lợi
             ...allLanguages.map((langCode): ColumnDef<TranslationRow> => ({
                 id: `lang_${langCode}`,
                 accessorFn: (row: TranslationRow) => row.values[langCode],
-                size: 300,
+                // size: 300,
                 header: ({ column }) => (
                     <div className="flex items-center justify-between w-full group pr-1">
                         <span>{langCode.toUpperCase()}</span>
                         <DropdownMenu>
+                            {/* SỬA: Loại bỏ hẳn asChild nguy hiểm ở đây */}
                             <DropdownMenuTrigger
+                                title="Column actions"
                                 className={cn(
                                     buttonVariants({ variant: "ghost", size: "icon" }),
-                                    "h-6 w-6 opacity-40 group-hover:opacity-100 transition-opacity cursor-pointer focus-visible:ring-1 focus-visible:ring-primary"
+                                    "h-6 w-6 opacity-40 group-hover:opacity-100 transition-opacity cursor-pointer focus-visible:ring-1 focus-visible:ring-primary outline-none"
                                 )}
                             >
                                 <MoreHorizontal className="w-4 h-4" />
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuContent align="end" className="w-44">
                                 <DropdownMenuItem onClick={() => column.toggleVisibility(false)} className="cursor-pointer">
                                     <EyeOff className="w-4 h-4 mr-2 text-muted-foreground" /> Ẩn cột này
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleDeleteLanguage(langCode)} className="cursor-pointer text-red-600 focus:bg-red-50 focus:text-red-700">
+                                {/* SỬA MỤC 6: Phân tách rõ màu danger trực quan */}
+                                <DropdownMenuItem onClick={() => handleDeleteLanguage(langCode)} className="cursor-pointer text-red-600 focus:bg-red-50 focus:text-red-700 font-medium">
                                     <Trash className="w-4 h-4 mr-2" /> Xóa ngôn ngữ
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
@@ -158,13 +165,13 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                 id: "status",
                 accessorKey: "changeStatus",
                 header: () => <div className="text-center w-full">Trạng thái</div>,
-                size: 100, // Fixed size để Sticky toán học chuẩn xác
+                size: 100,
                 cell: ({ row }: { row: Row<TranslationRow> }) => {
                     const isMissing = Object.values(row.original.translationStatus).includes('missing');
                     const changeStatus = row.original.changeStatus;
                     return (
                         <div className="flex items-center justify-center h-full w-full min-h-12.5 bg-inherit">
-                            {isMissing && <Badge variant="destructive" className="text-base h-6 px-2.5 rounded-sm bg-red-500/90 hover:bg-red-500">Missing</Badge>}
+                            {isMissing && <Badge variant="destructive" className="text-base h-6 px-2.5 rounded-sm bg-red-500/90 hover:bg-red-50">Missing</Badge>}
                             {changeStatus !== "unchanged" && !isMissing && (
                                 <Badge
                                     variant={changeStatus === "added" ? "default" : changeStatus === "deleted" ? "destructive" : "secondary"}
@@ -180,7 +187,7 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
             {
                 id: "actions",
                 header: "",
-                size: 60, // Fixed size để Sticky toán học chuẩn xác
+                size: 60,
                 cell: ({ row }) => {
                     const isDeleted = row.original.changeStatus === 'deleted';
                     const handleToggleDelete = async () => {
@@ -200,7 +207,7 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                         }
                     };
                     return (
-                        <div className="flex items-center justify-center w-full bg-inherit">
+                        <div className="flex items-center justify-center w-full bg-inherit h-full">
                             <Button
                                 variant="ghost"
                                 size="icon"

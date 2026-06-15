@@ -5,22 +5,23 @@ import { type TranslationRow } from "@/lib/db";
 import { cn } from "@/lib/utils";
 import { flexRender, type Table as TanStackTable } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useMemo } from "react";
 
 interface VirtualizedTableBodyProps {
     table: TanStackTable<TranslationRow>;
     scrollRef: React.RefObject<HTMLDivElement | null>;
 }
 
-export function VirtualizedTableBody({ table, scrollRef }: VirtualizedTableBodyProps) {
+export function VirtualizedTableBody({
+    table,
+    scrollRef,
+}: VirtualizedTableBodyProps) {
     const { rows } = table.getRowModel();
 
-    // Khởi tạo Virtualizer
     const rowVirtualizer = useVirtualizer({
         count: rows.length,
         getScrollElement: () => scrollRef.current,
-        // Estimate size 64px (Chiều cao trung bình của 1 row Shadcn có padding)
         estimateSize: () => 64,
-        // Giữ trước 10 dòng trên/dưới DOM để cuộn chuột nhanh không bị nháy (flicker) trắng
         overscan: 10,
     });
 
@@ -31,7 +32,10 @@ export function VirtualizedTableBody({ table, scrollRef }: VirtualizedTableBodyP
         return (
             <TableBody>
                 <TableRow>
-                    <TableCell colSpan={totalColumns} className="h-24 text-center">
+                    <TableCell
+                        colSpan={totalColumns}
+                        className="h-24 text-center"
+                    >
                         Không có dữ liệu phù hợp.
                     </TableCell>
                 </TableRow>
@@ -39,35 +43,42 @@ export function VirtualizedTableBody({ table, scrollRef }: VirtualizedTableBodyP
         );
     }
 
-    // Tính toán chiều cao không gian trống phía trên và dưới
     const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
-    const paddingBottom = virtualItems.length > 0
-        ? rowVirtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end
-        : 0;
+    const paddingBottom =
+        virtualItems.length > 0
+            ? rowVirtualizer.getTotalSize() -
+            virtualItems[virtualItems.length - 1].end
+            : 0;
 
     return (
         <TableBody>
-            {/* Không gian đệm phía trên (Spacer Top) */}
             {paddingTop > 0 && (
                 <TableRow>
-                    <TableCell style={{ height: `${paddingTop}px` }} colSpan={totalColumns} className="p-0 border-0" />
+                    <TableCell
+                        style={{ height: `${paddingTop}px` }}
+                        colSpan={totalColumns}
+                        className="p-0 border-0"
+                    />
                 </TableRow>
             )}
 
-            {/* Chỉ render các dòng nằm trong Viewport */}
             {virtualItems.map((virtualRow) => {
                 const row = rows[virtualRow.index];
-                const changeBorder = row.original.changeStatus === "added" ? "border-l-4 border-emerald-500" : row.original.changeStatus === "updated" ? "border-l-4 border-amber-500" : "";
+                const changeBorder =
+                    row.original.changeStatus === "added"
+                        ? "border-l-4 border-emerald-500"
+                        : row.original.changeStatus === "updated"
+                            ? "border-l-4 border-amber-500"
+                            : "";
 
                 return (
                     <TableRow
                         key={row.id}
-                        className={cn(changeBorder, "group")} // Thêm class group để bắt hover
+                        className={cn(changeBorder, "group")}
                         ref={rowVirtualizer.measureElement}
                         data-index={virtualRow.index}
                     >
                         {row.getVisibleCells().map((cell) => {
-                            // FIX STICKY RIGHT BODY: Áp dụng logic tương tự Header
                             const isActions = cell.column.id === "actions";
                             const isStatus = cell.column.id === "status";
                             const isSticky = isActions || isStatus;
@@ -76,15 +87,27 @@ export function VirtualizedTableBody({ table, scrollRef }: VirtualizedTableBodyP
                                 <TableCell
                                     key={cell.id}
                                     style={{
-                                        right: isActions ? 0 : isStatus ? 60 : undefined,
-                                        height: "1px" // MẸO CSS: Ép chiều cao thẻ con h-full bung lụa theo chiều cao của hàng chứa nó
+                                        right: isActions
+                                            ? 0
+                                            : isStatus
+                                                ? 60
+                                                : undefined,
+                                        height: "1px",
                                     }}
                                     className={cn(
                                         "align-top border-r last:border-r-0 p-0 transition-colors bg-background",
-                                        isSticky ? "sticky z-20 shadow-[-2px_0_5px_rgba(0,0,0,0.03)] group-hover:bg-muted/30" : "hover:bg-muted/30"
+                                        // SỬA: Thay thế bg-red-500 và bg-blue-500 bằng bg-background chuẩn khối đặc
+                                        isActions &&
+                                        "sticky right-0 z-30 bg-background border-l shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.08)] group-hover:bg-muted/40",
+                                        isStatus &&
+                                        "sticky z-30 bg-background border-l shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.04)] group-hover:bg-muted/40",
+                                        !isSticky && "hover:bg-muted/30",
                                     )}
                                 >
-                                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                    {flexRender(
+                                        cell.column.columnDef.cell,
+                                        cell.getContext(),
+                                    )}
                                 </TableCell>
                             );
                         })}
@@ -92,10 +115,13 @@ export function VirtualizedTableBody({ table, scrollRef }: VirtualizedTableBodyP
                 );
             })}
 
-            {/* Không gian đệm phía dưới (Spacer Bottom) */}
             {paddingBottom > 0 && (
                 <TableRow>
-                    <TableCell style={{ height: `${paddingBottom}px` }} colSpan={totalColumns} className="p-0 border-0" />
+                    <TableCell
+                        style={{ height: `${paddingBottom}px` }}
+                        colSpan={totalColumns}
+                        className="p-0 border-0"
+                    />
                 </TableRow>
             )}
         </TableBody>

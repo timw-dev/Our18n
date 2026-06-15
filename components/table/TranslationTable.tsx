@@ -38,12 +38,8 @@ export default function TranslationTable() {
     const totalCols = useMemo(() => project?.languages.length || 0, [project]);
     const visibleLanguages = useMemo(() => project?.languages || [], [project]);
 
-    // =========================================================
-    // FIX F5: DÙNG REF ĐỂ KHÓA TRẠNG THÁI KHỞI TẠO
-    // =========================================================
     const isVisibilityRestored = useRef(false);
 
-    // 1. Đọc từ LocalStorage LÊN Bảng (Chỉ chạy 1 lần khi load Project)
     useEffect(() => {
         if (activeProjectId && project && !isVisibilityRestored.current) {
             const savedVis = localStorage.getItem(`our18n_vis_${activeProjectId}`);
@@ -54,11 +50,10 @@ export default function TranslationTable() {
                     console.error("Lỗi parse visibility state");
                 }
             }
-            isVisibilityRestored.current = true; // Chốt khóa
+            isVisibilityRestored.current = true;
         }
     }, [activeProjectId, project, table]);
 
-    // 2. Ghi từ Bảng XUỐNG LocalStorage (Chỉ ghi khi đã khôi phục xong)
     useEffect(() => {
         if (isVisibilityRestored.current && activeProjectId) {
             const currentVis = table.getState().columnVisibility;
@@ -66,11 +61,9 @@ export default function TranslationTable() {
         }
     }, [table.getState().columnVisibility, activeProjectId]);
 
-    // Khi đổi Project, mở khóa để reset quy trình đọc
     useEffect(() => {
         isVisibilityRestored.current = false;
     }, [activeProjectId]);
-    // =========================================================
 
     const { handlePaste, handleCopy } = useTableSpreadsheetCopyPaste({
         table,
@@ -82,7 +75,8 @@ export default function TranslationTable() {
         const activeElem = document.activeElement;
         const isUserEditing = activeElem?.tagName === "TEXTAREA" && !activeElem.hasAttribute("readOnly");
 
-        if (selectedRange && !editingCell && !isUserEditing && hiddenInputRef.current) {
+        // CHỈ FOCUS vào hidden input ẩn của bảng nếu user KHÔNG ĐANG focus vào toolbar chỉnh sửa
+        if (selectedRange && !editingCell && !isUserEditing && activeElem?.tagName !== "INPUT" && hiddenInputRef.current) {
             hiddenInputRef.current.focus();
         }
     }, [selectedRange, editingCell]);
@@ -99,11 +93,22 @@ export default function TranslationTable() {
     useEffect(() => {
         const handleKeyDownGlobal = async (e: KeyboardEvent) => {
             const activeElem = document.activeElement;
-            if (activeElem?.tagName === "TEXTAREA" && activeElem !== hiddenInputRef.current) return;
+
+            // ==========================================
+            // FIX CHÍ MẠNG: CHẶN TUYỆT ĐỐI CƯỚP FOCUS KHI ĐANG GÕ Ô SEARCH HOẶC INPUT KHÁC
+            // ==========================================
+            if (
+                activeElem?.tagName === "INPUT" ||
+                activeElem?.tagName === "TEXTAREA" && activeElem !== hiddenInputRef.current ||
+                activeElem?.hasAttribute("contenteditable")
+            ) {
+                return; // Trả lại toàn bộ quyền gõ phím chuẩn cho trình duyệt, không can thiệp logic bảng
+            }
 
             const key = e.key;
             const isCtrlOrMeta = e.ctrlKey || e.metaKey;
 
+            // Phím tắt Undo/Redo
             const isRedoShortcut = (isCtrlOrMeta && key.toLowerCase() === "y") || (isCtrlOrMeta && e.shiftKey && key.toLowerCase() === "z");
             if (isRedoShortcut) {
                 e.preventDefault();
@@ -124,50 +129,102 @@ export default function TranslationTable() {
             const currentRowData = tableRows[currentAnchor.rowIdx]?.original;
             if (!currentRowData) return;
 
-            const currentLangCode = visibleLanguages[currentAnchor.colIdx];
+            // QUẢN LÝ DANH SÁCH CỘT ĐANG HIỆN THỰC TẾ (SKIP HIDDEN COLUMNS)
+            const allLeafCols = table.getAllLeafColumns();
+            const visibleLangCols = allLeafCols.filter(col => col.id.startsWith("lang_") && col.getIsVisible());
+            const totalVisibleCols = visibleLangCols.length;
 
-            if (key === "Enter") {
+            if (totalVisibleCols === 0) return;
+
+            const currentLangCode = visibleLanguages[currentAnchor.colIdx];
+            const currentVisibleColIdx = visibleLangCols.findIndex(col => col.id === `lang_${currentLangCode}`);
+
+            const moveToCell = (rowIdx: number, visibleColIdx: number) => {
+                const targetColId = visibleLangCols[visibleColIdx].id;
+                const targetLangCode = targetColId.replace("lang_", "");
+                const targetGlobalColIdx = visibleLanguages.indexOf(targetLangCode);
+
+                const target = { rowIdx, colIdx: targetGlobalColIdx };
+                setSelectedRange({ start: target, end: target });
+            };
+
+            // ==========================================
+            // CHỐT MỤC HỦY BỎ: NÚT BACK CHO TEXT KHI ĐANG SỬA Ô (PHÍM ESCAPE)
+            // ==========================================
+            if (key === "Escape") {
                 e.preventDefault();
-                setEditingCell(currentAnchor);
+                if (editingCell) {
+                    setEditingCell(null); // Đóng chế độ sửa, giữ nguyên dữ liệu gốc ban đầu của DB
+                    toast.info("Đã hủy bỏ sửa đổi ô.");
+                    if (hiddenInputRef.current) hiddenInputRef.current.focus();
+                }
                 return;
             }
 
+            // MỤC 4 - ENTER / F2 BEHAVIOR
+            if (key === "Enter") {
+                e.preventDefault();
+                setEditingCell(currentAnchor);
+                setTimeout(() => {
+                    const txtArea = document.querySelector("td textarea") as HTMLTextAreaElement;
+                    if (txtArea) txtArea.select();
+                }, 40);
+                return;
+            }
+
+            if (key === "F2") {
+                e.preventDefault();
+                setEditingCell(currentAnchor);
+                setTimeout(() => {
+                    const txtArea = document.querySelector("td textarea") as HTMLTextAreaElement;
+                    if (txtArea) {
+                        const len = txtArea.value.length;
+                        txtArea.setSelectionRange(len, len);
+                    }
+                }, 40);
+                return;
+            }
+
+            // MỤC 3 - TAB WRAP INSIDE GRID
             if (key === "Tab") {
+                e.preventDefault();
+
                 if (e.shiftKey) {
-                    if (currentAnchor.colIdx > 0) {
-                        e.preventDefault();
-                        const prevCell = { rowIdx: currentAnchor.rowIdx, colIdx: currentAnchor.colIdx - 1 };
-                        setSelectedRange({ start: prevCell, end: prevCell });
+                    if (currentVisibleColIdx > 0) {
+                        moveToCell(currentAnchor.rowIdx, currentVisibleColIdx - 1);
+                    } else if (currentAnchor.rowIdx > 0) {
+                        moveToCell(currentAnchor.rowIdx - 1, totalVisibleCols - 1);
                     }
                 } else {
-                    if (currentAnchor.colIdx < totalCols - 1) {
-                        e.preventDefault();
-                        const nextCell = { rowIdx: currentAnchor.rowIdx, colIdx: currentAnchor.colIdx + 1 };
-                        setSelectedRange({ start: nextCell, end: nextCell });
+                    if (currentVisibleColIdx < totalVisibleCols - 1) {
+                        moveToCell(currentAnchor.rowIdx, currentVisibleColIdx + 1);
+                    } else if (currentAnchor.rowIdx < tableRows.length - 1) {
+                        moveToCell(currentAnchor.rowIdx + 1, 0);
                     }
                 }
                 return;
             }
 
+            // MỤC 2 - MŨI TÊN CHỈ ĐI QUA CỘT ĐANG HIỆN
             if (key === "ArrowRight") {
                 e.preventDefault();
-                const target = { rowIdx: currentAnchor.rowIdx, colIdx: Math.min(totalCols - 1, currentAnchor.colIdx + 1) };
-                setSelectedRange({ start: target, end: target });
+                const nextVisibleIdx = Math.min(totalVisibleCols - 1, currentVisibleColIdx + 1);
+                moveToCell(currentAnchor.rowIdx, nextVisibleIdx);
             }
             if (key === "ArrowLeft") {
                 e.preventDefault();
-                const target = { rowIdx: currentAnchor.rowIdx, colIdx: Math.max(0, currentAnchor.colIdx - 1) };
-                setSelectedRange({ start: target, end: target });
+                const prevVisibleIdx = Math.max(0, currentVisibleColIdx - 1);
+                moveToCell(currentAnchor.rowIdx, prevVisibleIdx);
             }
             if (key === "ArrowDown") {
                 e.preventDefault();
-                const target = { rowIdx: Math.min(tableRows.length - 1, currentAnchor.rowIdx + 1), colIdx: currentAnchor.colIdx };
-                setSelectedRange({ start: target, end: target });
+                const nextRowIdx = Math.min(tableRows.length - 1, currentAnchor.rowIdx + 1);
+                moveToCell(nextRowIdx, currentVisibleColIdx);
             }
             if (key === "ArrowUp") {
                 e.preventDefault();
-                const target = { rowIdx: Math.max(0, currentAnchor.rowIdx - 1), colIdx: currentAnchor.colIdx };
-                setSelectedRange({ start: target, end: target });
+                const prevRowIdx = Math.max(0, currentAnchor.rowIdx - 1);
+                moveToCell(prevRowIdx, currentVisibleColIdx);
             }
 
             if (key === "Delete" || key === "Backspace") {
@@ -215,7 +272,24 @@ export default function TranslationTable() {
 
         window.addEventListener("keydown", handleKeyDownGlobal);
         return () => window.removeEventListener("keydown", handleKeyDownGlobal);
-    }, [selectedRange, totalCols, visibleLanguages, table, performUndo, performRedo, pushToUndo, setEditingCell, setSelectedRange]);
+    }, [selectedRange,
+        totalCols,
+        visibleLanguages,
+        table,
+        performUndo,
+        performRedo,
+        pushToUndo,
+        setEditingCell,
+        setSelectedRange,
+        !!editingCell
+    ]);
+
+    const langColWidth = useMemo(() => {
+        if (!table) return 300;
+        const visibleLangCount = table.getAllLeafColumns().filter(col => col.id.startsWith("lang_") && col.getIsVisible()).length;
+        if (visibleLangCount <= 2) return 450;
+        return 320;
+    }, [table, project]);
 
     if (!activeProjectId || !project) {
         return <div className="p-10 text-center text-muted-foreground">Vui lòng chọn Project.</div>;
@@ -240,8 +314,8 @@ export default function TranslationTable() {
                 ref={tableContainerRef}
                 className="flex-1 relative border rounded-md shadow-sm bg-background w-full overflow-auto outline-none [&>div]:overflow-visible"
             >
-                {/* FIX KHOẢNG TRẮNG: Sử dụng w-full để bảng linh hoạt lấp đầy */}
-                <Table className="w-full border-collapse">
+                {/* SỬA: Thêm class [&_td:nth-last-child(3)]:border-r-0 để triệt tiêu đường viền thừa tiếp giáp với cột Sticky, triệt hạ 100% vệt hở line */}
+                <Table className="table-fixed min-w-full w-full border-collapse [&_td:nth-last-child(3)]:border-r-0 [&_th:nth-last-child(3)]:border-r-0">
                     <TableHeader className="sticky top-0 bg-background z-30 shadow-sm border-b ring-1 ring-border">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <TableRow key={headerGroup.id} className="bg-muted hover:bg-muted">
@@ -255,14 +329,13 @@ export default function TranslationTable() {
                                         <TableHead
                                             key={header.id}
                                             style={{
-                                                // FIX AUTO WIDTH: Ép 'auto' cho cột NN để nó giãn ra hết mức có thể
-                                                width: isLangCol ? "auto" : header.getSize(),
-                                                minWidth: isLangCol ? "250px" : undefined,
+                                                width: isLangCol ? langColWidth : header.getSize(),
                                                 right: isActions ? 0 : isStatus ? 60 : undefined
                                             }}
                                             className={cn(
-                                                "border-r last:border-r-0 font-extrabold uppercase text-[11px] text-foreground/80 tracking-wider h-10 px-2 align-middle bg-muted",
-                                                isSticky && "sticky z-50 shadow-[-2px_0_5px_rgba(0,0,0,0.03)]"
+                                                "border-r last:border-r-0 font-extrabold uppercase text-[11px] text-foreground/80 tracking-wider h-10 px-2 align-middle bg-muted select-none",
+                                                isActions && "sticky right-0 z-50 bg-muted border-l shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]",
+                                                isStatus && "sticky z-40 bg-muted border-l shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.2)]"
                                             )}
                                         >
                                             {!header.isPlaceholder && flexRender(header.column.columnDef.header, header.getContext())}

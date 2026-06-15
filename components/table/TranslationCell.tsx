@@ -72,6 +72,24 @@ export const TranslationCell = memo(({ row, langCode, rowIdx, colIdx }: Translat
         }
     };
 
+    // ==========================================
+    // CHẶN BẮT SỰ KIỆN PHÍM BÊN TRONG TEXTAREA
+    // ==========================================
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            setValue(dbValue); // 1. Trả lại giá trị gốc từ Database
+            setEditingCell(null); // 2. Thoát khỏi chế độ sửa (sẽ tự động nhả focus về ẩn)
+        }
+        else if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault(); // 1. Chặn hành vi Enter tạo dòng mới
+            e.stopPropagation();
+            textareaRef.current?.blur(); // 2. Ép Blur để kích hoạt hàm handleBlur lưu DB ở trên
+        }
+        // Phím Shift + Enter sẽ tự do lọt qua để user xuống dòng thủ công nếu muốn
+    };
+
     // Đón chặn click chuột trái để quét khối dải ô Excel, ngăn chặn lem màu xanh chữ native
     const handleCellMouseDown = (e: React.MouseEvent) => {
         if (isEditing) return;
@@ -103,7 +121,6 @@ export const TranslationCell = memo(({ row, langCode, rowIdx, colIdx }: Translat
                 isSelected && !isAnchor && "ring-2 ring-blue-600/60 ring-inset z-10"
             )}
         >
-            {/* FIX: Thêm pointer-events-none và hạ z-index xuống 10 */}
             {isChanged && <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500 z-10 pointer-events-none" />}
             {isMissing && <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-400 z-10 pointer-events-none" />}
 
@@ -117,14 +134,14 @@ export const TranslationCell = memo(({ row, langCode, rowIdx, colIdx }: Translat
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
                     onBlur={handleBlur}
+                    onKeyDown={handleKeyDown} // BỔ SUNG SỰ KIỆN VÀO ĐÂY
                     placeholder="Nhập bản dịch..."
                     rows={1}
                     className="w-full bg-background resize-none py-3 pr-3 pl-4 rounded-none border border-transparent transition-all outline-none cursor-text font-sans text-sm text-foreground leading-relaxed z-40 shadow-inner"
                     style={{ height: "auto" }}
                 />
-            )
-            }
-        </div >
+            )}
+        </div>
     );
 });
 

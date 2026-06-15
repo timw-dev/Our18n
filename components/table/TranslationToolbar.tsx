@@ -2,7 +2,7 @@
 import { SaveSnapshotDialog } from "./SaveSnapshotDialog";
 import { useState, useMemo } from "react";
 import { type Table as TanStackTable } from "@tanstack/react-table";
-import { Download, Loader2, Trash2, Columns3 } from "lucide-react";
+import { Trash2, Columns3 } from "lucide-react";
 import { toast } from "sonner";
 import { useLiveQuery } from "dexie-react-hooks";
 
@@ -12,9 +12,9 @@ import { useAppStore } from "@/app/store/useAppStore";
 
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Button, buttonVariants } from "@/components/ui/button"; // Đã import buttonVariants
+import { Button, buttonVariants } from "@/components/ui/button";
 import { VersionHistoryPanel } from "@/components/VersionHistoryPanel";
-import { cn } from "@/lib/utils"; // Đã import cn
+import { cn } from "@/lib/utils";
 
 import {
     DropdownMenu,
@@ -22,6 +22,7 @@ import {
     DropdownMenuContent,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ExportDialog } from "@/components/table/ExportDialog";
 
 interface TranslationToolbarProps {
     table: TanStackTable<TranslationRow>;
@@ -70,14 +71,20 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
         }
     };
 
-    const handleExport = async () => {
+    // NÂNG CẤP: Chấp nhận mảng filter ngôn ngữ từ Dialog truyền lên
+    const handleExport = async (selectedLanguages?: string[]) => {
         if (!activeProjectId || isTableEmpty) return;
         setIsExporting(true);
         const toastId = toast.loading("Đang nén file Export...");
         try {
             const project = await db.projects.get(activeProjectId);
             if (!project) throw new Error("Project không tồn tại");
-            await exportProjectAsZip(activeProjectId, project.name, currentVersionName);
+
+            // Truyền mảng lọc ngôn ngữ xuống export-utils
+            await exportProjectAsZip(activeProjectId, project.name, currentVersionName, {
+                languageCodes: selectedLanguages
+            });
+
             toast.success("Export thành công!", { id: toastId });
         } catch (error) {
             console.error(error);
@@ -107,6 +114,16 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
     );
 
     const languageColumns = table.getAllLeafColumns().filter(column => column.id.startsWith("lang_"));
+
+    const visibleLanguagesList = useMemo(() => {
+        return languageColumns
+            .filter(col => col.getIsVisible())
+            .map(col => col.id.replace("lang_", ""));
+    }, [languageColumns]);
+
+    const allLanguagesList = useMemo(() => {
+        return languageColumns.map(col => col.id.replace("lang_", ""));
+    }, [languageColumns]);
 
     return (
         <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-muted/30 border rounded-md">
@@ -162,8 +179,6 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
                 </div>
 
                 <div className="flex items-center gap-2 pl-4 border-l">
-
-                    {/* KHÔNG CÒN asChild - SỬ DỤNG buttonVariants CHUẨN */}
                     <DropdownMenu>
                         <DropdownMenuTrigger
                             className={cn(
@@ -204,15 +219,14 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
                         </>
                     )}
 
-                    <Button
-                        onClick={handleExport}
-                        disabled={isTableEmpty || isExporting}
-                        className="gap-2 shadow-sm"
-                        variant="outline"
-                    >
-                        {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                        Export ZIP
-                    </Button>
+                    {/* SỬA: Thay thế bằng ExportDialog bọc chuẩn chỉ */}
+                    <ExportDialog
+                        allLanguages={allLanguagesList}
+                        visibleLanguages={visibleLanguagesList}
+                        isExporting={isExporting}
+                        isTableEmpty={isTableEmpty}
+                        onExport={handleExport}
+                    />
                 </div>
             </div>
         </div>
