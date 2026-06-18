@@ -46,7 +46,7 @@ export const metadata: Metadata = {
     "spreadsheet translation",
   ],
   openGraph: {
-    title: "Our18n v0.3.0 Beta | Local-first Translation Workspace",
+    title: "Our18n v0.3.3 Beta | Local-first Translation Workspace",
     description:
       "A local-first workspace for managing localization files. Import, edit, compare, snapshot, and export translations directly in your browser.",
     url: "https://our18n.vercel.app",

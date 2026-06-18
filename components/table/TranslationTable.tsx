@@ -316,7 +316,7 @@ export default function TranslationTable() {
             >
                 {/* SỬA: Thêm class [&_td:nth-last-child(3)]:border-r-0 để triệt tiêu đường viền thừa tiếp giáp với cột Sticky, triệt hạ 100% vệt hở line */}
                 <Table className="table-fixed min-w-full w-full border-collapse [&_td:nth-last-child(3)]:border-r-0 [&_th:nth-last-child(3)]:border-r-0">
-                    <TableHeader className="sticky top-0 bg-background z-30 shadow-sm border-b ring-1 ring-border">
+                    <TableHeader className="sticky top-0 bg-background z-50 shadow-sm border-b ring-1 ring-border">
                         {table.getHeaderGroups().map((headerGroup) => (
                             <TableRow key={headerGroup.id} className="bg-muted hover:bg-muted">
                                 {headerGroup.headers.map((header) => {
@@ -334,8 +334,8 @@ export default function TranslationTable() {
                                             }}
                                             className={cn(
                                                 "border-r last:border-r-0 font-extrabold uppercase text-[11px] text-foreground/80 tracking-wider h-10 px-2 align-middle bg-muted select-none",
-                                                isActions && "sticky right-0 z-50 bg-muted border-l shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]",
-                                                isStatus && "sticky z-40 bg-muted border-l shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.2)]"
+                                                isActions && "sticky right-0 z-60 bg-muted border-l shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]",
+                                                isStatus && "sticky z-60 bg-muted border-l shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.2)]"
                                             )}
                                         >
                                             {!header.isPlaceholder && flexRender(header.column.columnDef.header, header.getContext())}

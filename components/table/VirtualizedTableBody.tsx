@@ -98,9 +98,9 @@ export function VirtualizedTableBody({
                                         "align-top border-r last:border-r-0 p-0 transition-colors bg-background",
                                         // SỬA: Thay thế bg-red-500 và bg-blue-500 bằng bg-background chuẩn khối đặc
                                         isActions &&
-                                        "sticky right-0 z-30 bg-background border-l shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.08)] group-hover:bg-muted/40",
+                                        "sticky right-0 z-30 bg-background border-l-2 border-l-muted shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.08)] group-hover:bg-muted/40",
                                         isStatus &&
-                                        "sticky z-30 bg-background border-l shadow-[-6px_0_10px_-4px_rgba(0,0,0,0.04)] group-hover:bg-muted/40",
+                                        "sticky z-30 bg-background border-l-2 border-l-mutedshadow-[-6px_0_10px_-4px_rgba(0,0,0,0.04)] group-hover:bg-muted/40",
                                         !isSticky && "hover:bg-muted/30",
                                     )}
                                 >

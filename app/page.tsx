@@ -53,7 +53,7 @@ export default function Home() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b pb-3 shrink-0">
         <div className="space-y-2 flex flex-col items-start justify-center w-full">
           <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight">Our18n v0.3.0 Beta</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Our18n v0.3.3 Beta</h1>
             <p className="text-xs text-muted-foreground max-w-2xl">
               Không gian làm việc quản lý tệp đa ngôn ngữ. Nhập dữ liệu, chỉnh sửa, so sánh phiên bản và xuất file trực tiếp.
             </p>

@@ -167,11 +167,14 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                 header: () => <div className="text-center w-full">Trạng thái</div>,
                 size: 100,
                 cell: ({ row }: { row: Row<TranslationRow> }) => {
-                    const isMissing = Object.values(row.original.translationStatus).includes('missing');
+                    const activeLangs = project?.languages || [];
+
+                    const isMissing = activeLangs.some(lang => !row.original.values[lang]?.trim());
+
                     const changeStatus = row.original.changeStatus;
                     return (
                         <div className="flex items-center justify-center h-full w-full min-h-12.5 bg-inherit">
-                            {isMissing && <Badge variant="destructive" className="text-base h-6 px-2.5 rounded-sm bg-red-500/90 hover:bg-red-50">Missing</Badge>}
+                            {isMissing && <Badge variant="destructive" className="text-base h-6 px-2.5 rounded-sm bg-red-500/90 hover:bg-red-500">Missing</Badge>}
                             {changeStatus !== "unchanged" && !isMissing && (
                                 <Badge
                                     variant={changeStatus === "added" ? "default" : changeStatus === "deleted" ? "destructive" : "secondary"}
