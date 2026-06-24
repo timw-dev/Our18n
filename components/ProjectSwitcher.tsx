@@ -7,6 +7,8 @@ import { toast } from "sonner";
 
 import { db } from "@/lib/db";
 import { useAppStore } from "@/app/store/useAppStore";
+import { useSpreadsheetStore } from "@/app/store/useSpreadsheetStore";
+import { useSpreadsheetInteractionLock } from "@/hooks/useSpreadsheetInteractionLock";
 // Import hàm clearProjectData mới từ utils vào đây
 import { createProject, renameProject, deleteProject, clearProjectData } from "@/lib/project-utils";
 
@@ -36,9 +38,25 @@ export function ProjectSwitcher() {
 
     const [dialogMode, setDialogMode] = useState<'new' | 'rename' | 'clear' | 'delete' | null>(null);
     const [inputValue, setInputValue] = useState("");
+    const commitActiveEdit = useSpreadsheetStore((state) => state.commitActiveEdit);
+    useSpreadsheetInteractionLock("project-dialog", dialogMode !== null);
+
+    const switchProject = async (projectId: string) => {
+        const committed = await commitActiveEdit();
+        if (!committed) {
+            toast.error("Không thể đổi dự án vì ô đang sửa chưa được lưu.");
+            return;
+        }
+        setActiveProject(projectId);
+    };
 
     const handleAction = async () => {
         try {
+            const committed = await commitActiveEdit();
+            if (!committed) {
+                toast.error("Không thể tiếp tục vì ô đang sửa chưa được lưu.");
+                return;
+            }
             if (dialogMode === 'new') {
                 if (!inputValue.trim()) return toast.error("Tên không được để trống");
                 const newId = await createProject(inputValue.trim(), 'en');
@@ -91,7 +109,7 @@ export function ProjectSwitcher() {
                     {projects.map((p) => (
                         <DropdownMenuItem
                             key={p.id}
-                            onClick={() => setActiveProject(p.id)}
+                            onClick={() => { void switchProject(p.id); }}
                             className="flex items-center justify-between cursor-pointer"
                         >
                             <span className="truncate">{p.name}</span>

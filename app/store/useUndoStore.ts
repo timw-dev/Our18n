@@ -1,9 +1,8 @@
 "use client";
 
 import { create } from "zustand";
-import { db } from "@/lib/db";
-
-type RowChangeStatus = "unchanged" | "updated" | "added" | "deleted";
+import { buildTranslationCellUpdate, db } from "@/lib/db";
+import { useAppStore } from "@/app/store/useAppStore";
 
 interface UndoCommand {
     type: "PASTE" | "EDIT";
@@ -58,34 +57,15 @@ export const useUndoStore = create<UndoStore>((set, get) => ({
                             currentRow.values[lang] || "";
                     });
 
-                    // Tiến hành khôi phục dữ liệu cũ
-                    const newValues = { ...currentRow.values, ...oldValues };
-
-                    // Xóa hẳn key rỗng ra khỏi database nếu dữ liệu undo về trạng thái chưa từng tồn tại
-                    Object.keys(newValues).forEach((key) => {
-                        if (
-                            newValues[key] === undefined ||
-                            newValues[key] === null ||
-                            newValues[key] === ""
-                        ) {
-                            delete newValues[key];
-                        }
-                    });
-
-                    const isUnchanged =
-                        JSON.stringify(newValues) ===
-                        JSON.stringify(currentRow.originalValues);
-                    const finalStatus: RowChangeStatus = isUnchanged
-                        ? "unchanged"
-                        : "updated";
-
-                    await db.translationRows.update(rowId, {
-                        values: newValues,
-                        changeStatus: finalStatus,
-                    });
+                    let nextRow = currentRow;
+                    for (const [lang, value] of Object.entries(oldValues)) {
+                        nextRow = { ...nextRow, ...buildTranslationCellUpdate(nextRow, lang, value) };
+                    }
+                    await db.translationRows.put(nextRow);
                 }
             }
         });
+        useAppStore.getState().setActiveVersion(null);
 
         set((state) => ({
             undoStack: state.undoStack.slice(0, -1),
@@ -119,33 +99,15 @@ export const useUndoStore = create<UndoStore>((set, get) => ({
                             currentRow.values[lang] || "";
                     });
 
-                    // Nạp đè giá trị tương lai vào lại mạng lưới dữ liệu
-                    const newValues = { ...currentRow.values, ...futureValues };
-
-                    Object.keys(newValues).forEach((key) => {
-                        if (
-                            newValues[key] === undefined ||
-                            newValues[key] === null ||
-                            newValues[key] === ""
-                        ) {
-                            delete newValues[key];
-                        }
-                    });
-
-                    const isUnchanged =
-                        JSON.stringify(newValues) ===
-                        JSON.stringify(currentRow.originalValues);
-                    const finalStatus: RowChangeStatus = isUnchanged
-                        ? "unchanged"
-                        : "updated";
-
-                    await db.translationRows.update(rowId, {
-                        values: newValues,
-                        changeStatus: finalStatus,
-                    });
+                    let nextRow = currentRow;
+                    for (const [lang, value] of Object.entries(futureValues)) {
+                        nextRow = { ...nextRow, ...buildTranslationCellUpdate(nextRow, lang, value) };
+                    }
+                    await db.translationRows.put(nextRow);
                 }
             }
         });
+        useAppStore.getState().setActiveVersion(null);
 
         set((state) => ({
             redoStack: state.redoStack.slice(0, -1),

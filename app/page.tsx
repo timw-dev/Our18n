@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 
 import { db } from "@/lib/db";
 import { useAppStore } from "@/app/store/useAppStore";
+import { useSpreadsheetStore } from "@/app/store/useSpreadsheetStore";
+import { useSpreadsheetInteractionLock } from "@/hooks/useSpreadsheetInteractionLock";
 import { Button } from "@/components/ui/button";
 import ProjectUploader from "@/components/ProjectUploader";
 import TranslationTable from "@/components/table/TranslationTable";
@@ -17,6 +19,8 @@ export default function Home() {
   const projects = useLiveQuery(() => db.projects.toArray());
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const commitActiveEdit = useSpreadsheetStore((state) => state.commitActiveEdit);
+  useSpreadsheetInteractionLock("import-dialog", isImportModalOpen);
 
   const hasData = useLiveQuery(
     () => activeProjectId ? db.namespaces.where({ projectId: activeProjectId }).count() : 0,
@@ -65,7 +69,9 @@ export default function Home() {
         </div>
 
         {activeProjectId && hasData !== undefined && hasData > 0 && (
-          <Button onClick={() => setIsImportModalOpen(true)} className="gap-2 shrink-0">
+          <Button onClick={async () => {
+            if (await commitActiveEdit()) setIsImportModalOpen(true);
+          }} className="gap-2 shrink-0">
             <Upload className="w-4 h-4" />
             Import Folders
           </Button>

@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import ImportPreviewTable from "./import-preview/ImportPreviewTable";
+import { useSpreadsheetInteractionLock } from "@/hooks/useSpreadsheetInteractionLock";
 
 interface ProjectUploaderProps {
     projectId: string;
@@ -24,6 +25,7 @@ export default function ProjectUploader({ projectId, onUploadComplete }: Project
     const [activeNamespace, setActiveNamespace] = useState<string | null>(null);
     const [currentFilterTab, setCurrentFilterTab] = useState<"all" | "added" | "updated" | "conflicted">("all");
     const [conflictResolutions, setConflictResolutions] = useState<Record<string, "local" | "incoming">>({});
+    useSpreadsheetInteractionLock("import-preview", previewResult !== null);
 
     const detectedLanguagesList = useMemo<string[]>(() => {
         if (!previewResult?.pendingData?.detectedLanguages) return [];

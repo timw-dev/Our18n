@@ -81,6 +81,36 @@ export interface VersionRecord {
     snapshot: SnapshotRow[];
 }
 
+export function buildTranslationCellUpdate(
+    row: TranslationRow,
+    langCode: string,
+    value: string,
+): Pick<TranslationRow, "values" | "cellMeta" | "changeStatus" | "updatedAt"> {
+    const nextValues = { ...row.values, [langCode]: value };
+    const languages = new Set([...Object.keys(nextValues), ...Object.keys(row.originalValues ?? {})]);
+    const hasAnyChanged = Array.from(languages).some(
+        (lang) => (nextValues[lang] || "") !== (row.originalValues?.[lang] || ""),
+    );
+
+    const nextChangeStatus = row.changeStatus === "added" || row.changeStatus === "deleted"
+        ? row.changeStatus
+        : hasAnyChanged ? "updated" : "unchanged";
+
+    return {
+        values: nextValues,
+        cellMeta: {
+            ...(row.cellMeta ?? {}),
+            [langCode]: {
+                ...(row.cellMeta?.[langCode] ?? {}),
+                changeStatus: value !== (row.originalValues?.[langCode] || "") ? "updated" : "unchanged",
+                translationStatus: value.trim() ? "translated" : "missing",
+            },
+        },
+        changeStatus: nextChangeStatus,
+        updatedAt: new Date().toISOString(),
+    };
+}
+
 export async function updateTranslationCell(
     rowId: string,
     langCode: string,
@@ -92,47 +122,7 @@ export async function updateTranslationCell(
         throw new Error("Translation row not found");
     }
 
-    const nextValues = {
-        ...row.values,
-        [langCode]: value,
-    };
-
-    const hasAnyChanged = Object.keys(nextValues).some((lang) => {
-        return (nextValues[lang] || "") !== (row.originalValues?.[lang] || "");
-    });
-
-    let nextChangeStatus = row.changeStatus;
-
-    if (row.changeStatus === "added" || row.changeStatus === "deleted") {
-        nextChangeStatus = row.changeStatus;
-    } else {
-        nextChangeStatus = hasAnyChanged ? "updated" : "unchanged";
-    }
-
-    const nextCellChangeStatus: ChangeStatus =
-        value !== (row.originalValues?.[langCode] || "")
-            ? "updated"
-            : "unchanged";
-
-    const nextTranslationStatus: TranslationStatus = value.trim()
-        ? "translated"
-        : "missing";
-
-    const nextCellMeta: NonNullable<TranslationRow["cellMeta"]> = {
-        ...(row.cellMeta ?? {}),
-        [langCode]: {
-            ...(row.cellMeta?.[langCode] ?? {}),
-            changeStatus: nextCellChangeStatus,
-            translationStatus: nextTranslationStatus,
-        },
-    };
-
-    await db.translationRows.update(rowId, {
-        values: nextValues,
-        cellMeta: nextCellMeta,
-        changeStatus: nextChangeStatus,
-        updatedAt: new Date().toISOString(),
-    });
+    await db.translationRows.update(rowId, buildTranslationCellUpdate(row, langCode, value));
 }
 
 export interface ProjectVersion {

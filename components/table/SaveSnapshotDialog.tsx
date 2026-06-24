@@ -4,6 +4,8 @@
 import { useEffect, useState } from "react";
 import { Save, Loader2, History } from "lucide-react";
 import { toast } from "sonner";
+import { useSpreadsheetStore } from "@/app/store/useSpreadsheetStore";
+import { useSpreadsheetInteractionLock } from "@/hooks/useSpreadsheetInteractionLock";
 
 import { createSnapshot } from "@/lib/snapshot-utils";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -30,6 +32,8 @@ export function SaveSnapshotDialog({ projectId, hasChanges }: SaveSnapshotDialog
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
     const [isSaving, setIsSaving] = useState(false);
+    const commitActiveEdit = useSpreadsheetStore((state) => state.commitActiveEdit);
+    useSpreadsheetInteractionLock("snapshot-dialog", open);
 
     useEffect(() => {
         if (!open) {
@@ -52,6 +56,8 @@ export function SaveSnapshotDialog({ projectId, hasChanges }: SaveSnapshotDialog
         const toastId = toast.loading("Đang lưu Snapshot...");
 
         try {
+            const committed = await commitActiveEdit();
+            if (!committed) throw new Error("Không thể commit ô đang chỉnh sửa");
             const result = await createSnapshot(projectId, name.trim(), description.trim());
 
             toast.success(`Đã chốt phiên bản ${result.version} (${result.changeCount} thay đổi)!`, { id: toastId });

@@ -9,6 +9,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, type TranslationRow } from "@/lib/db";
 import { exportProjectAsZip } from "@/lib/export-utils";
 import { useAppStore } from "@/app/store/useAppStore";
+import { useSpreadsheetStore } from "@/app/store/useSpreadsheetStore";
 
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -33,6 +34,8 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
     const { activeProjectId } = useAppStore();
     const [newLang, setNewLang] = useState("");
     const [isExporting, setIsExporting] = useState(false);
+    const editSession = useSpreadsheetStore((state) => state.editSession);
+    const commitActiveEdit = useSpreadsheetStore((state) => state.commitActiveEdit);
 
     const filteredRows = table.getFilteredRowModel().rows.length;
     const isTableEmpty = totalRows === 0;
@@ -77,6 +80,8 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
         setIsExporting(true);
         const toastId = toast.loading("Đang nén file Export...");
         try {
+            const committed = await commitActiveEdit();
+            if (!committed) throw new Error("Không thể commit ô đang chỉnh sửa");
             const project = await db.projects.get(activeProjectId);
             if (!project) throw new Error("Project không tồn tại");
 
@@ -100,18 +105,26 @@ export function TranslationToolbar({ table, totalRows }: TranslationToolbarProps
         if (!confirm) return;
 
         try {
-            const idsToDelete = selectedRows.map(r => r.original.id);
-            await db.translationRows.bulkDelete(idsToDelete);
+            const committed = await commitActiveEdit();
+            if (!committed) throw new Error("Không thể commit ô đang chỉnh sửa");
+            await db.transaction("rw", db.translationRows, async () => {
+                await Promise.all(selectedRows.map(row => db.translationRows.update(row.original.id, {
+                    changeStatus: "deleted",
+                    updatedAt: new Date().toISOString(),
+                })));
+            });
+            useAppStore.getState().setActiveVersion(null);
             table.resetRowSelection();
-            toast.success(`Đã xóa thành công ${selectedRows.length} dòng.`);
+            toast.success(`Đã đánh dấu xóa ${selectedRows.length} dòng. Các dòng sẽ được xóa khi lưu Snapshot.`);
         } catch (error) {
             toast.error("Lỗi khi xóa hàng loạt.");
         }
     };
 
-    const hasChanges = table.getPreFilteredRowModel().rows.some(
+    const hasPersistedChanges = table.getPreFilteredRowModel().rows.some(
         row => row.original.changeStatus !== 'unchanged'
     );
+    const hasChanges = hasPersistedChanges || Boolean(editSession && editSession.draftValue !== editSession.baseValue);
 
     const languageColumns = table.getAllLeafColumns().filter(column => column.id.startsWith("lang_"));
 

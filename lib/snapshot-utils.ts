@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { db, type TranslationRow, type SnapshotRow } from "./db";
 import { useAppStore } from "@/app/store/useAppStore";
+import { useUndoStore } from "@/app/store/useUndoStore";
 
 function bumpPatchVersion(currentVersion: string): string {
     const parts = currentVersion.split(".");
@@ -83,6 +84,12 @@ export const createSnapshot = async (
                         ...row,
                         originalValues: { ...row.values },
                         changeStatus: "unchanged" as const,
+                        cellMeta: row.cellMeta ? Object.fromEntries(
+                            Object.entries(row.cellMeta).map(([lang, meta]) => [lang, {
+                                ...meta,
+                                changeStatus: "unchanged" as const,
+                            }]),
+                        ) : undefined,
                         updatedAt: now,
                     });
                 }
@@ -94,6 +101,9 @@ export const createSnapshot = async (
             if (rowsToUpdate.length > 0) {
                 await db.translationRows.bulkPut(rowsToUpdate);
             }
+
+            useUndoStore.getState().clearUndo();
+            useAppStore.getState().setActiveVersion(versionId);
 
             return {
                 success: true,

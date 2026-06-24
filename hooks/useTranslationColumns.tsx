@@ -156,8 +156,6 @@ export function useTranslationColumns(project?: Project, namespaces: Namespace[]
                     <TranslationCell
                         row={row.original}
                         langCode={langCode}
-                        rowIdx={row.index}
-                        colIdx={allLanguages.indexOf(langCode)}
                     />
                 ),
             })),

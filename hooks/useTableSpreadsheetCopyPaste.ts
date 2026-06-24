@@ -10,8 +10,6 @@ import { type Table as TanStackTable } from "@tanstack/react-table";
 
 interface UseSpreadsheetCopyPasteProps<TData> {
     table: TanStackTable<TData>;
-    projectId: string;
-    visibleLanguages: string[];
 }
 
 export function useTableSpreadsheetCopyPaste<
@@ -22,11 +20,12 @@ export function useTableSpreadsheetCopyPaste<
         values: Record<string, string>;
         changeStatus: string;
     },
->({ table, projectId, visibleLanguages }: UseSpreadsheetCopyPasteProps<TData>) {
+>({ table }: UseSpreadsheetCopyPasteProps<TData>) {
     const { selectedRange } = useSpreadsheetStore();
 
     const handlePaste = useCallback(
         async (event: ClipboardEvent) => {
+            if (Object.keys(useSpreadsheetStore.getState().interactionLocks).length > 0) return;
             const target = event.target as HTMLElement;
 
             // CẬP NHẬT RÀO CHẮN AN TOÀN:
@@ -51,15 +50,19 @@ export function useTableSpreadsheetCopyPaste<
             const parsedMatrix = rows.map((row) => row.split("\t"));
 
             const tableRows = table.getFilteredRowModel().rows;
+            const activeLanguages = table.getAllLeafColumns()
+                .filter(column => column.id.startsWith("lang_") && column.getIsVisible())
+                .map(column => column.id.replace("lang_", ""));
             if (tableRows.length === 0) return;
 
             // Lấy điểm đích bắt đầu dán dựa vào ô đang được active (Anchor), nếu không có thì mặc định là ô [0,0]
-            const startRowIdx = selectedRange
-                ? Math.min(selectedRange.start.rowIdx, selectedRange.end.rowIdx)
-                : 0;
-            const startColIdx = selectedRange
-                ? Math.min(selectedRange.start.colIdx, selectedRange.end.colIdx)
-                : 0;
+            const selectedStartRow = selectedRange ? tableRows.findIndex(row => row.original.id === selectedRange.start.rowId) : 0;
+            const selectedEndRow = selectedRange ? tableRows.findIndex(row => row.original.id === selectedRange.end.rowId) : 0;
+            const selectedStartCol = selectedRange ? activeLanguages.indexOf(selectedRange.start.langCode) : 0;
+            const selectedEndCol = selectedRange ? activeLanguages.indexOf(selectedRange.end.langCode) : 0;
+            const startRowIdx = selectedRange ? Math.min(selectedStartRow, selectedEndRow) : 0;
+            const startColIdx = selectedRange ? Math.min(selectedStartCol, selectedEndCol) : 0;
+            if (startRowIdx < 0 || startColIdx < 0) return;
 
             let cellsUpdatedCount = 0;
             const rowsToUpdateMap = new Map<string, TranslationRow>();
@@ -89,10 +92,10 @@ export function useTableSpreadsheetCopyPaste<
 
                 matrixRow.forEach((cellValue, cOffset) => {
                     const targetColIdx = startColIdx + cOffset;
-                    if (targetColIdx >= visibleLanguages.length) return;
+                    if (targetColIdx >= activeLanguages.length) return;
 
-                    const targetLang = visibleLanguages[targetColIdx];
-                    const sanitizedValue = cellValue.trim();
+                    const targetLang = activeLanguages[targetColIdx];
+                    const sanitizedValue = cellValue;
 
                     if (
                         currentRowUpdate.values[targetLang] !== sanitizedValue
@@ -110,19 +113,24 @@ export function useTableSpreadsheetCopyPaste<
                         }
 
                         currentRowUpdate.values[targetLang] = sanitizedValue;
+                        currentRowUpdate.cellMeta = {
+                            ...(currentRowUpdate.cellMeta ?? {}),
+                            [targetLang]: {
+                                ...(currentRowUpdate.cellMeta?.[targetLang] ?? {}),
+                                changeStatus: sanitizedValue === (currentRowUpdate.originalValues[targetLang] || "") ? "unchanged" : "updated",
+                                translationStatus: sanitizedValue.trim() ? "translated" : "missing",
+                            },
+                        };
                         cellsUpdatedCount++;
                     }
                 });
 
-                if (
-                    cellsUpdatedCount > 0 &&
-                    currentRowUpdate.changeStatus === "unchanged"
-                ) {
-                    currentRowUpdate.changeStatus = "updated" as
-                        | "unchanged"
-                        | "updated"
-                        | "added"
-                        | "deleted";
+                if (currentRowUpdate.changeStatus !== "added" && currentRowUpdate.changeStatus !== "deleted") {
+                    const languages = new Set([...Object.keys(currentRowUpdate.values), ...Object.keys(currentRowUpdate.originalValues)]);
+                    const hasChanges = Array.from(languages).some(lang =>
+                        (currentRowUpdate.values[lang] || "") !== (currentRowUpdate.originalValues[lang] || "")
+                    );
+                    currentRowUpdate.changeStatus = hasChanges ? "updated" : "unchanged";
                 }
             });
 
@@ -155,13 +163,14 @@ export function useTableSpreadsheetCopyPaste<
                 toast.error("Lỗi khi update paste.", { id: toastId });
             }
         },
-        [table, visibleLanguages, selectedRange],
+        [table, selectedRange],
     );
 
     // --- TASK 2: MULTI CELL COPY (TRÍCH XUẤT THEO RANGE KHỐI) ---
     // --- TRONG HÀM handleCopy CỦA FILE useTableSpreadsheetCopyPaste.ts ---
     const handleCopy = useCallback(
         (event: ClipboardEvent) => {
+            if (Object.keys(useSpreadsheetStore.getState().interactionLocks).length > 0) return;
             const target = event.target as HTMLElement;
 
             // CHỈ CHẶN COPY NẾU USER ĐANG TRONG QUÁ TRÌNH GÕ CHỮ THỰC SỰ TRÊN CÁC Ô ĐANG CHỈNH SỬA
@@ -177,30 +186,26 @@ export function useTableSpreadsheetCopyPaste<
 
             // ... (Giữ nguyên toàn bộ khối logic tính toán ma trận tsvLines ở phía dưới) ...
             const tableRows = table.getFilteredRowModel().rows;
+            const activeLanguages = table.getAllLeafColumns()
+                .filter(column => column.id.startsWith("lang_") && column.getIsVisible())
+                .map(column => column.id.replace("lang_", ""));
             if (tableRows.length === 0) return;
 
             let startRow = 0;
             let endRow = tableRows.length - 1;
             let startCol = 0;
-            let endCol = visibleLanguages.length - 1;
+            let endCol = activeLanguages.length - 1;
 
             if (selectedRange) {
-                startRow = Math.min(
-                    selectedRange.start.rowIdx,
-                    selectedRange.end.rowIdx,
-                );
-                endRow = Math.max(
-                    selectedRange.start.rowIdx,
-                    selectedRange.end.rowIdx,
-                );
-                startCol = Math.min(
-                    selectedRange.start.colIdx,
-                    selectedRange.end.colIdx,
-                );
-                endCol = Math.max(
-                    selectedRange.start.colIdx,
-                    selectedRange.end.colIdx,
-                );
+                const startRowIndex = tableRows.findIndex(row => row.original.id === selectedRange.start.rowId);
+                const endRowIndex = tableRows.findIndex(row => row.original.id === selectedRange.end.rowId);
+                const startColumnIndex = activeLanguages.indexOf(selectedRange.start.langCode);
+                const endColumnIndex = activeLanguages.indexOf(selectedRange.end.langCode);
+                if ([startRowIndex, endRowIndex, startColumnIndex, endColumnIndex].some(index => index < 0)) return;
+                startRow = Math.min(startRowIndex, endRowIndex);
+                endRow = Math.max(startRowIndex, endRowIndex);
+                startCol = Math.min(startColumnIndex, endColumnIndex);
+                endCol = Math.max(startColumnIndex, endColumnIndex);
             }
 
             const tsvLines: string[] = [];
@@ -208,7 +213,7 @@ export function useTableSpreadsheetCopyPaste<
                 const rowData = tableRows[r].original;
                 const lineCells: string[] = [];
                 for (let c = startCol; c <= endCol; c++) {
-                    const lang = visibleLanguages[c];
+                    const lang = activeLanguages[c];
                     const val = rowData.values[lang] || "";
                     if (
                         val.includes("\n") ||
@@ -232,7 +237,7 @@ export function useTableSpreadsheetCopyPaste<
                 );
             }
         },
-        [table, visibleLanguages, selectedRange],
+        [table, selectedRange],
     );
 
     return { handlePaste, handleCopy };

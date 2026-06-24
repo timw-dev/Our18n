@@ -40,6 +40,8 @@ import {
 import { db } from "@/lib/db";
 import { deleteSnapshot, restoreSnapshot } from "@/lib/snapshot-utils";
 import { cn } from "@/lib/utils";
+import { useSpreadsheetStore } from "@/app/store/useSpreadsheetStore";
+import { useSpreadsheetInteractionLock } from "@/hooks/useSpreadsheetInteractionLock";
 
 interface VersionHistoryPanelProps {
     projectId: string;
@@ -189,23 +191,28 @@ export function VersionHistoryPanel({ projectId, currentVersionName }: VersionHi
     const router = useRouter();
     const [open, setOpen] = useState(false);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    useSpreadsheetInteractionLock("version-history", open);
 
     const versions = useLiveQuery(() => db.versions.where({ projectId }).reverse().sortBy('createdAt'), [projectId]);
-    const unsavedCount = useLiveQuery(
+    const persistedUnsavedCount = useLiveQuery(
         () => db.translationRows.where({ projectId }).filter(row => row.changeStatus !== 'unchanged').count(),
         [projectId]
     ) || 0;
+    const editSession = useSpreadsheetStore((state) => state.editSession);
+    const cancelEditing = useSpreadsheetStore((state) => state.cancelEditing);
+    const unsavedCount = persistedUnsavedCount + (editSession && editSession.draftValue !== editSession.baseValue ? 1 : 0);
 
     const handleRestoreVersion = useCallback(async (versionId: string, versionName: string) => {
         const toastId = toast.loading("Đang khôi phục dữ liệu...");
         try {
+            cancelEditing();
             await restoreSnapshot(projectId, versionId);
             toast.success(`Đã khôi phục thành công về bản: ${versionName}`, { id: toastId });
             setOpen(false);
         } catch (error) {
             toast.error("Lỗi khi khôi phục dữ liệu.", { id: toastId });
         }
-    }, [projectId]);
+    }, [cancelEditing, projectId]);
 
     const handleDeleteVersion = useCallback(async (versionId: string) => {
         try {

@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { Download, Loader2, FolderArchive, Folder, Eye } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useSpreadsheetInteractionLock } from "@/hooks/useSpreadsheetInteractionLock";
 import {
     Dialog,
     DialogContent,
@@ -33,6 +34,7 @@ export function ExportDialog({
     onExport,
 }: ExportDialogProps) {
     const [open, setOpen] = useState(false);
+    useSpreadsheetInteractionLock("export-dialog", open);
     const [selectedLangs, setSelectedLangs] = useState<string[]>([]);
 
     useEffect(() => {

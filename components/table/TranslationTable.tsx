@@ -10,7 +10,7 @@ import { useSpreadsheetStore } from "@/app/store/useSpreadsheetStore";
 import { useUndoStore } from "@/app/store/useUndoStore";
 import { useTranslationColumns } from "@/hooks/useTranslationColumns";
 import { useTranslationTable } from "@/hooks/useTranslationTable";
-import { db } from "@/lib/db";
+import { db, updateTranslationCell } from "@/lib/db";
 
 import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useTableSpreadsheetCopyPaste } from "@/hooks/useTableSpreadsheetCopyPaste";
@@ -23,7 +23,8 @@ export default function TranslationTable() {
     const hiddenInputRef = useRef<HTMLTextAreaElement>(null);
     const { activeProjectId } = useAppStore();
 
-    const { selectedRange, editingCell, setSelectedRange, setEditingCell } = useSpreadsheetStore();
+    const { selectedRange, editSession, setSelectedRange, beginEditing, cancelEditing } = useSpreadsheetStore();
+    const isInteractionLocked = useSpreadsheetStore((state) => Object.keys(state.interactionLocks).length > 0);
     const { performUndo, performRedo, pushToUndo } = useUndoStore();
 
     const project = useLiveQuery(() => activeProjectId ? db.projects.get(activeProjectId) : undefined, [activeProjectId]);
@@ -34,9 +35,6 @@ export default function TranslationTable() {
     const columns = useTranslationColumns(project, namespaces || []);
 
     const table = useTranslationTable(data, columns);
-
-    const totalCols = useMemo(() => project?.languages.length || 0, [project]);
-    const visibleLanguages = useMemo(() => project?.languages || [], [project]);
 
     const isVisibilityRestored = useRef(false);
 
@@ -67,8 +65,6 @@ export default function TranslationTable() {
 
     const { handlePaste, handleCopy } = useTableSpreadsheetCopyPaste({
         table,
-        projectId: activeProjectId || "",
-        visibleLanguages,
     });
 
     useEffect(() => {
@@ -76,10 +72,10 @@ export default function TranslationTable() {
         const isUserEditing = activeElem?.tagName === "TEXTAREA" && !activeElem.hasAttribute("readOnly");
 
         // CHỈ FOCUS vào hidden input ẩn của bảng nếu user KHÔNG ĐANG focus vào toolbar chỉnh sửa
-        if (selectedRange && !editingCell && !isUserEditing && activeElem?.tagName !== "INPUT" && hiddenInputRef.current) {
+        if (!isInteractionLocked && selectedRange && !editSession && !isUserEditing && activeElem?.tagName !== "INPUT" && hiddenInputRef.current) {
             hiddenInputRef.current.focus();
         }
-    }, [selectedRange, editingCell]);
+    }, [selectedRange, editSession, isInteractionLocked]);
 
     useEffect(() => {
         window.addEventListener("paste", handlePaste);
@@ -92,6 +88,7 @@ export default function TranslationTable() {
 
     useEffect(() => {
         const handleKeyDownGlobal = async (e: KeyboardEvent) => {
+            if (isInteractionLocked) return;
             const activeElem = document.activeElement;
 
             // ==========================================
@@ -123,10 +120,10 @@ export default function TranslationTable() {
             }
 
             if (!selectedRange) return;
-            const currentAnchor = selectedRange.start;
-
             const tableRows = table.getFilteredRowModel().rows;
-            const currentRowData = tableRows[currentAnchor.rowIdx]?.original;
+            const currentAnchor = selectedRange.start;
+            const currentRowIdx = tableRows.findIndex(row => row.original.id === currentAnchor.rowId);
+            const currentRowData = tableRows[currentRowIdx]?.original;
             if (!currentRowData) return;
 
             // QUẢN LÝ DANH SÁCH CỘT ĐANG HIỆN THỰC TẾ (SKIP HIDDEN COLUMNS)
@@ -136,15 +133,15 @@ export default function TranslationTable() {
 
             if (totalVisibleCols === 0) return;
 
-            const currentLangCode = visibleLanguages[currentAnchor.colIdx];
+            const currentLangCode = currentAnchor.langCode;
             const currentVisibleColIdx = visibleLangCols.findIndex(col => col.id === `lang_${currentLangCode}`);
+            if (currentVisibleColIdx < 0) return;
 
             const moveToCell = (rowIdx: number, visibleColIdx: number) => {
-                const targetColId = visibleLangCols[visibleColIdx].id;
-                const targetLangCode = targetColId.replace("lang_", "");
-                const targetGlobalColIdx = visibleLanguages.indexOf(targetLangCode);
-
-                const target = { rowIdx, colIdx: targetGlobalColIdx };
+                const targetRow = tableRows[rowIdx]?.original;
+                const targetColumn = visibleLangCols[visibleColIdx];
+                if (!targetRow || !targetColumn) return;
+                const target = { rowId: targetRow.id, langCode: targetColumn.id.replace("lang_", "") };
                 setSelectedRange({ start: target, end: target });
             };
 
@@ -153,8 +150,8 @@ export default function TranslationTable() {
             // ==========================================
             if (key === "Escape") {
                 e.preventDefault();
-                if (editingCell) {
-                    setEditingCell(null); // Đóng chế độ sửa, giữ nguyên dữ liệu gốc ban đầu của DB
+                if (editSession) {
+                    cancelEditing();
                     toast.info("Đã hủy bỏ sửa đổi ô.");
                     if (hiddenInputRef.current) hiddenInputRef.current.focus();
                 }
@@ -164,24 +161,13 @@ export default function TranslationTable() {
             // MỤC 4 - ENTER / F2 BEHAVIOR
             if (key === "Enter") {
                 e.preventDefault();
-                setEditingCell(currentAnchor);
-                setTimeout(() => {
-                    const txtArea = document.querySelector("td textarea") as HTMLTextAreaElement;
-                    if (txtArea) txtArea.select();
-                }, 40);
+                beginEditing(currentAnchor, currentRowData.values[currentLangCode] || "");
                 return;
             }
 
             if (key === "F2") {
                 e.preventDefault();
-                setEditingCell(currentAnchor);
-                setTimeout(() => {
-                    const txtArea = document.querySelector("td textarea") as HTMLTextAreaElement;
-                    if (txtArea) {
-                        const len = txtArea.value.length;
-                        txtArea.setSelectionRange(len, len);
-                    }
-                }, 40);
+                beginEditing(currentAnchor, currentRowData.values[currentLangCode] || "");
                 return;
             }
 
@@ -191,15 +177,15 @@ export default function TranslationTable() {
 
                 if (e.shiftKey) {
                     if (currentVisibleColIdx > 0) {
-                        moveToCell(currentAnchor.rowIdx, currentVisibleColIdx - 1);
-                    } else if (currentAnchor.rowIdx > 0) {
-                        moveToCell(currentAnchor.rowIdx - 1, totalVisibleCols - 1);
+                        moveToCell(currentRowIdx, currentVisibleColIdx - 1);
+                    } else if (currentRowIdx > 0) {
+                        moveToCell(currentRowIdx - 1, totalVisibleCols - 1);
                     }
                 } else {
                     if (currentVisibleColIdx < totalVisibleCols - 1) {
-                        moveToCell(currentAnchor.rowIdx, currentVisibleColIdx + 1);
-                    } else if (currentAnchor.rowIdx < tableRows.length - 1) {
-                        moveToCell(currentAnchor.rowIdx + 1, 0);
+                        moveToCell(currentRowIdx, currentVisibleColIdx + 1);
+                    } else if (currentRowIdx < tableRows.length - 1) {
+                        moveToCell(currentRowIdx + 1, 0);
                     }
                 }
                 return;
@@ -209,21 +195,21 @@ export default function TranslationTable() {
             if (key === "ArrowRight") {
                 e.preventDefault();
                 const nextVisibleIdx = Math.min(totalVisibleCols - 1, currentVisibleColIdx + 1);
-                moveToCell(currentAnchor.rowIdx, nextVisibleIdx);
+                moveToCell(currentRowIdx, nextVisibleIdx);
             }
             if (key === "ArrowLeft") {
                 e.preventDefault();
                 const prevVisibleIdx = Math.max(0, currentVisibleColIdx - 1);
-                moveToCell(currentAnchor.rowIdx, prevVisibleIdx);
+                moveToCell(currentRowIdx, prevVisibleIdx);
             }
             if (key === "ArrowDown") {
                 e.preventDefault();
-                const nextRowIdx = Math.min(tableRows.length - 1, currentAnchor.rowIdx + 1);
+                const nextRowIdx = Math.min(tableRows.length - 1, currentRowIdx + 1);
                 moveToCell(nextRowIdx, currentVisibleColIdx);
             }
             if (key === "ArrowUp") {
                 e.preventDefault();
-                const prevRowIdx = Math.max(0, currentAnchor.rowIdx - 1);
+                const prevRowIdx = Math.max(0, currentRowIdx - 1);
                 moveToCell(prevRowIdx, currentVisibleColIdx);
             }
 
@@ -237,14 +223,7 @@ export default function TranslationTable() {
                     beforeValues: { [currentRowData.id]: { [currentLangCode]: dbValue } }
                 });
 
-                const updatedValues = { ...currentRowData.values };
-                delete updatedValues[currentLangCode];
-
-                const isUnchanged = JSON.stringify(updatedValues) === JSON.stringify(currentRowData.originalValues);
-                await db.translationRows.update(currentRowData.id, {
-                    values: updatedValues,
-                    changeStatus: isUnchanged ? "unchanged" : "updated"
-                });
+                await updateTranslationCell(currentRowData.id, currentLangCode, "");
                 useAppStore.getState().setActiveVersion(null);
                 return;
             }
@@ -253,36 +232,56 @@ export default function TranslationTable() {
                 e.preventDefault();
                 const dbValue = currentRowData.values[currentLangCode] || "";
 
-                pushToUndo({
-                    type: "EDIT",
-                    beforeValues: { [currentRowData.id]: { [currentLangCode]: dbValue } }
-                });
-
-                setEditingCell(currentAnchor);
-
-                setTimeout(() => {
-                    const txtArea = document.querySelector("td textarea") as HTMLTextAreaElement;
-                    if (txtArea) {
-                        txtArea.value = key;
-                        txtArea.dispatchEvent(new Event('input', { bubbles: true }));
-                    }
-                }, 30);
+                beginEditing(currentAnchor, dbValue, key);
             }
         };
 
         window.addEventListener("keydown", handleKeyDownGlobal);
         return () => window.removeEventListener("keydown", handleKeyDownGlobal);
     }, [selectedRange,
-        totalCols,
-        visibleLanguages,
         table,
         performUndo,
         performRedo,
         pushToUndo,
-        setEditingCell,
+        beginEditing,
+        cancelEditing,
         setSelectedRange,
-        !!editingCell
+        editSession
+        , isInteractionLocked
     ]);
+
+    useEffect(() => {
+        const handleNavigate = (event: Event) => {
+            if (isInteractionLocked) return;
+            if (!selectedRange) return;
+            const direction = (event as CustomEvent<{ direction: "next" | "previous" | "down" }>).detail.direction;
+            const tableRows = table.getFilteredRowModel().rows;
+            const visibleLangCols = table.getAllLeafColumns().filter(col => col.id.startsWith("lang_") && col.getIsVisible());
+            const rowIdx = tableRows.findIndex(row => row.original.id === selectedRange.start.rowId);
+            const colIdx = visibleLangCols.findIndex(col => col.id === `lang_${selectedRange.start.langCode}`);
+            if (rowIdx < 0 || colIdx < 0) return;
+
+            let nextRow = rowIdx;
+            let nextCol = colIdx;
+            if (direction === "down") nextRow = Math.min(tableRows.length - 1, rowIdx + 1);
+            if (direction === "next") {
+                if (colIdx < visibleLangCols.length - 1) nextCol += 1;
+                else if (rowIdx < tableRows.length - 1) { nextRow += 1; nextCol = 0; }
+            }
+            if (direction === "previous") {
+                if (colIdx > 0) nextCol -= 1;
+                else if (rowIdx > 0) { nextRow -= 1; nextCol = visibleLangCols.length - 1; }
+            }
+
+            const targetRow = tableRows[nextRow]?.original;
+            const targetCol = visibleLangCols[nextCol];
+            if (!targetRow || !targetCol) return;
+            const target = { rowId: targetRow.id, langCode: targetCol.id.replace("lang_", "") };
+            setSelectedRange({ start: target, end: target });
+        };
+        window.addEventListener("our18n:navigate-cell", handleNavigate);
+        return () => window.removeEventListener("our18n:navigate-cell", handleNavigate);
+    }, [isInteractionLocked, selectedRange, setSelectedRange, table]);
 
     const langColWidth = useMemo(() => {
         if (!table) return 300;

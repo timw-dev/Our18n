@@ -1,7 +1,24 @@
 import { v4 as uuidv4 } from "uuid";
-import { db, type TranslationRow, type Namespace } from "./db";
+import { buildTranslationCellUpdate, db, type TranslationRow, type Namespace } from "./db";
 import { flattenJSON } from "./json-utils";
 import { getTranslationStatus } from "./translation-utils";
+
+export type ImportedCellDecision = "unchanged" | "safe-update" | "keep-local" | "conflict";
+
+export function classifyImportedCell(
+    baselineValue: string,
+    localValue: string,
+    incomingValue: string,
+): ImportedCellDecision {
+    if (incomingValue === localValue) return "unchanged";
+
+    const localChanged = localValue !== baselineValue;
+    const incomingChanged = incomingValue !== baselineValue;
+
+    if (!localChanged) return "safe-update";
+    if (!incomingChanged) return "keep-local";
+    return "conflict";
+}
 
 export interface PreviewRow {
     id: string;
@@ -291,16 +308,16 @@ export const analyzeImportedFiles = async (
                     langValues,
                 )) {
                     const localValue = existingRow.values[lang] || "";
-                    const valueChanged = localValue !== incomingValue;
+                    const baselineValue = existingRow.originalValues?.[lang] || "";
+                    const decision = isDeleted
+                        ? "conflict"
+                        : classifyImportedCell(baselineValue, localValue, incomingValue);
 
-                    if (valueChanged || isDeleted) {
+                    if (decision === "safe-update" || decision === "conflict") {
                         isRowUnchanged = false;
                         incomingValuesForUi[lang] = incomingValue;
 
-                        if (
-                            existingRow.changeStatus !== "unchanged" &&
-                            localValue !== ""
-                        ) {
+                        if (decision === "conflict") {
                             hasAnyConflict = true;
                             conflicts.push({
                                 id: `${existingRow.id}_${lang}`,
@@ -339,9 +356,11 @@ export const analyzeImportedFiles = async (
                     });
 
                     if (hasAnyConflict) {
-                        existingRow.changeStatus = "conflicted";
-                        existingRow.updatedAt = now;
-                        rowsToUpdate.push(existingRow);
+                        if (hasAnySafeUpdate) {
+                            existingRow.changeStatus = existingRow.changeStatus === "added" ? "added" : "updated";
+                            existingRow.updatedAt = now;
+                            rowsToUpdate.push(existingRow);
+                        }
                         conflictedCount++;
                     } else if (hasAnySafeUpdate) {
                         existingRow.changeStatus = "updated";
@@ -448,6 +467,12 @@ export const commitImportData = async (
 
     await db.transaction("rw", db.namespaces, db.translationRows, async () => {
         const pendingMap = new Map<string, TranslationRow>();
+        const conflictLangsByRow = new Map<string, Set<string>>();
+        conflicts.forEach((conflict) => {
+            const langs = conflictLangsByRow.get(conflict.rowId) ?? new Set<string>();
+            langs.add(conflict.lang);
+            conflictLangsByRow.set(conflict.rowId, langs);
+        });
 
         newRows.forEach((r) => {
             const previewVersion = previewRows.find((p) => p.id === r.id);
@@ -464,10 +489,11 @@ export const commitImportData = async (
         rowsToUpdate.forEach((r) => {
             const previewVersion = previewRows.find((p) => p.id === r.id);
             if (previewVersion) {
-                r.values = { ...previewVersion.values };
-                Object.entries(r.values).forEach(([lang, val]) => {
+                const conflictLangs = conflictLangsByRow.get(r.id) ?? new Set<string>();
+                Object.entries(previewVersion.values).forEach(([lang, val]) => {
+                    if (!conflictLangs.has(lang)) r.values[lang] = val;
                     if (!r.translationStatus) r.translationStatus = {};
-                    r.translationStatus[lang] = getTranslationStatus(val);
+                    r.translationStatus[lang] = getTranslationStatus(r.values[lang] || "");
                 });
             }
             pendingMap.set(r.id, r);
@@ -489,16 +515,15 @@ export const commitImportData = async (
                     const previewVersion = previewRows.find(
                         (p) => p.id === conflict.rowId,
                     );
-                    targetRow.values[conflict.lang] = previewVersion
+                    const resolvedValue = previewVersion
                         ? previewVersion.values[conflict.lang]
                         : conflict.incomingValue;
-
-                    targetRow.changeStatus = "updated";
-                    if (!targetRow.translationStatus)
-                        targetRow.translationStatus = {};
-                    targetRow.translationStatus[conflict.lang] =
-                        getTranslationStatus(targetRow.values[conflict.lang]);
-                    targetRow.updatedAt = new Date().toISOString();
+                    Object.assign(
+                        targetRow,
+                        buildTranslationCellUpdate(targetRow, conflict.lang, resolvedValue),
+                    );
+                    if (!targetRow.translationStatus) targetRow.translationStatus = {};
+                    targetRow.translationStatus[conflict.lang] = getTranslationStatus(resolvedValue);
 
                     if (!pendingMap.has(targetRow.id)) {
                         resolvedUpdatesMap.set(targetRow.id, targetRow);
